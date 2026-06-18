@@ -49,6 +49,7 @@ zzz-00067/
 - **复核标注**：待补拍 / 已确认 / 忽略 / 已归档 四种状态
 - **备注历史**：完整的备注历史记录，支持撤销
 - **状态持久化**：批次、规则版本、冲突、标注全部持久化
+- **草稿管理**：归档方案可保存为草稿，跨重启恢复并沿用原归档动作与冲突策略
 - **报告导出**：Markdown 和 CSV 两种格式
 
 ## 安装
@@ -145,19 +146,39 @@ patrol undo
 patrol undo
 ```
 
-### 8. 执行归档
+### 8. 草稿管理（可选，保存/恢复归档方案）
+```bash
+# 将当前预览方案保存为草稿
+patrol draft save "2026年6月巡检方案" -d "初次预览，待领导审批"
+
+# 列出所有草稿
+patrol draft list
+
+# 查看草稿详情（含归档动作、重复策略、预览项）
+patrol draft show "2026年6月巡检方案"
+
+# 恢复草稿到当前批次（沿用草稿中的归档动作和策略）
+patrol draft restore "2026年6月巡检方案"
+
+# 删除草稿
+patrol draft delete "2026年6月巡检方案"
+```
+
+### 9. 执行归档
 ```bash
 # 预览模式（不移动文件）
 patrol archive
 
-# 试运行
+# 试运行（不移动文件，显示执行结果）
 patrol archive --dry-run
 
 # 确认执行（会移动/复制文件）
 patrol archive --confirm
 ```
 
-### 9. 导出报告
+> **提示**：恢复草稿后执行归档时，将沿用草稿保存时的归档动作（copy/move）和重复策略，即使当前配置已修改也不会受影响。
+
+### 10. 导出报告
 ```bash
 # 导出 Markdown 报告
 patrol export markdown -o report.md
@@ -169,7 +190,7 @@ patrol export csv -o report.csv
 patrol export markdown -o report_simple.md --no-notes
 ```
 
-### 10. 批次管理
+### 11. 批次管理
 ```bash
 # 创建新批次
 patrol batch new --name "另一个批次"
@@ -184,7 +205,7 @@ patrol batch switch <batch_id>
 patrol batch show
 ```
 
-### 11. 规则快照管理
+### 12. 规则快照管理
 ```bash
 # 导出当前规则为快照文件
 patrol snapshot export -o rules_snapshot.json
@@ -340,6 +361,219 @@ patrol snapshot log        # 看到导入记录
 patrol batch switch 旧批次1
 patrol export markdown -o test.md  # 报告显示新版本
 ```
+
+## 草稿管理完整流程
+
+### 场景说明
+草稿用于将当前批次的预览方案（含归档动作、重复策略、冲突状态、预览项）持久化保存，便于跨重启恢复、或在调整配置后切换回已审批的方案。恢复后归档将**沿用草稿保存时的动作与策略**，不受当前配置变化影响。
+
+### 主流程：save → list/show → restore → archive --dry-run/--confirm
+
+#### 1. 准备数据并生成预览
+```bash
+cd sample
+patrol import --csv points.csv --notes notes.json --batch-name "2026年6月巡检"
+patrol rules set-action copy
+patrol rules set-duplicate rename
+patrol scan --dir photos
+patrol preview
+```
+
+#### 2. 保存草稿（draft save）
+```bash
+patrol draft save "6月巡检-审批版" -d "rename策略+copy动作，已通过组长复核"
+```
+
+**预期输出：**
+```
+✓ 草稿已保存
+  草稿 ID: draft_20260619_xxxxxx_xxxxxxxx
+  草稿名称: 6月巡检-审批版
+  创建时间: 2026-06-19 xx:xx:xx
+  来源批次: 2026年6月巡检
+  规则版本: v2
+  预览项数: 9
+  冲突: 0 (未解决 0)
+```
+
+#### 3. 列出草稿（draft list）
+```bash
+patrol draft list
+```
+
+#### 4. 查看草稿详情（draft show）
+```bash
+patrol draft show "6月巡检-审批版"
+```
+
+**预期输出包含：**
+- 草稿基本信息（ID、名称、描述、创建时间）
+- 来源批次信息（批次ID、名称、创建时间、点位数、照片数）
+- **规则信息（关键）**：规则版本、重复策略、归档动作、命名模板
+- 内容摘要：预览项数、冲突总数、未解决冲突数、冲突分布
+- 预览项表格（前10项）
+
+> **验证要点**：确认"重复策略"为 `rename`、"归档动作"为 `copy`，与保存时一致。
+
+---
+
+### 场景一：恢复后沿用草稿动作（当前配置已变更）
+
+#### 5. 修改当前配置（模拟配置被改动）
+```bash
+patrol rules set-action move
+patrol rules set-duplicate block
+patrol rules show
+```
+
+此时当前配置：归档动作为 `move`，重复策略为 `block`，与草稿中保存的 `copy` + `rename` 不一致。
+
+#### 6. 恢复草稿（draft restore）
+```bash
+patrol draft restore "6月巡检-审批版"
+```
+
+**存在差异时会先显示警告并要求确认：**
+```
+⚠ 检测到以下差异：
+  • 规则版本不匹配：草稿基于 v2，当前为 v4
+  • 重复策略不匹配：草稿为 rename，当前为 block
+  • 归档动作不匹配：草稿为 copy，当前为 move
+
+检测到草稿与当前状态存在差异，恢复后将覆盖当前批次的预览和冲突数据。是否继续？ [y/N]:
+```
+
+输入 `n` 取消恢复：
+```
+已取消恢复
+```
+
+输入 `y` 确认，或使用 `--force` 跳过确认：
+```bash
+patrol draft restore "6月巡检-审批版" --force
+```
+
+**恢复成功输出：**
+```
+✓ 草稿已恢复到当前批次
+  草稿: 6月巡检-审批版
+  恢复预览项: 9
+  恢复冲突: 0 (未解决 0)
+  归档动作: copy
+  重复策略: rename
+
+⚠ 注意：草稿中保存的规则与当前配置不一致
+  • 归档动作: 草稿为 copy，当前配置为 move
+    → 将沿用草稿中的 copy 动作执行归档
+  • 重复策略: 草稿为 rename，当前配置为 block
+    → 将沿用草稿中的 rename 策略处理冲突
+
+提示：可以运行 'archive --dry-run' 验证恢复后的归档方案
+```
+
+#### 7. 验证归档动作——dry-run
+```bash
+patrol archive --dry-run
+```
+
+**关键输出验证：**
+```
+当前归档动作: copy
+⚠ 预览中保存的动作与当前配置不一致，将沿用预览中的动作
+=== 归档试运行 ===
+总计: 9 项
+  成功: 9
+  失败: 0
+  跳过: 0
+```
+
+> **验证要点**：输出必须显示 `当前归档动作: copy`（草稿值）而非当前配置的 `move`，并出现"预览中保存的动作与当前配置不一致"的提示。
+
+#### 8. 确认执行归档（沿用草稿动作）
+```bash
+patrol archive --confirm
+```
+
+执行后源照片文件**仍存在**（因为草稿保存的是 `copy` 动作）。
+
+---
+
+### 场景二：跨重启后再次恢复仍可验证
+
+#### 9. 保存草稿后模拟 CLI 重启
+草稿数据持久化在 `.patrol-archiver/drafts/` 目录下，重启后依然存在：
+
+```bash
+# 修改当前配置为 move + skip（模拟另一个人改了配置）
+patrol rules set-action move
+patrol rules set-duplicate skip
+
+# 清除当前批次的预览（模拟新批次状态）
+patrol batch new --name "新批次-重启后"
+patrol import --csv points.csv --batch-name "新批次-重启后"
+patrol scan --dir photos
+```
+
+此时当前批次没有预览数据，且配置为 `move` + `skip`。
+
+#### 10. 跨重启后列出草稿
+```bash
+patrol draft list
+```
+
+草稿依然存在，说明持久化正常。
+
+#### 11. 跨重启后查看草稿详情
+```bash
+patrol draft show "6月巡检-审批版"
+```
+
+确认规则信息仍然是：归档动作 `copy`、重复策略 `rename`。
+
+#### 12. 跨重启后恢复草稿
+```bash
+patrol draft restore "6月巡检-审批版" --force
+```
+
+**恢复输出中应包含：**
+```
+归档动作: copy
+重复策略: rename
+
+⚠ 注意：草稿中保存的规则与当前配置不一致
+  • 归档动作: 草稿为 copy，当前配置为 move
+    → 将沿用草稿中的 copy 动作执行归档
+```
+
+#### 13. 跨重启后 dry-run 验证
+```bash
+patrol archive --dry-run
+```
+
+**关键验证：**
+```
+当前归档动作: copy
+⚠ 预览中保存的动作与当前配置不一致，将沿用预览中的动作
+```
+
+> **跨重启验证通过**：即使 CLI 重启、当前批次被切换、配置被多次修改，草稿仍可被完整恢复，归档动作和重复策略始终沿用草稿保存时的值。
+
+---
+
+### 冲突策略优先级说明
+
+恢复草稿后，归档时的规则优先级如下（从高到低）：
+
+| 优先级 | 来源 | 说明 |
+|--------|------|------|
+| 1（最高） | 草稿中每个 PreviewItem 保存的 `archive_action` / `duplicate_strategy` | 实际执行归档时读取此字段 |
+| 2 | 草稿级别的 `archive_action` / `duplicate_strategy`（`draft show` 可见） | 保存草稿时的配置快照，用于恢复时提示 |
+| 3（最低） | 当前工作区配置（`rules show` 可见） | 草稿恢复后不会影响此字段 |
+
+**验证方法**：
+- `patrol draft show <草稿名>` → 查看草稿级别的动作和策略
+- `patrol archive --dry-run` → 输出顶部会显示"当前归档动作"以及是否与配置不一致
+- 执行 `--confirm` 后检查源文件是否存在（`copy` 应存在，`move` 应不存在）
 
 ## 完整可复现流程
 
@@ -539,6 +773,13 @@ Commands:
     import   导入规则快照（冲突时需确认）
     log      查看快照导入操作日志
     show     查看当前快照信息或指定快照内容
+
+  draft      归档方案草稿管理（保存、查看、恢复预览方案）
+    save     将当前批次的预览结果保存为草稿
+    list     列出所有草稿
+    show     查看草稿详情
+    restore  恢复草稿到当前批次
+    delete   删除指定草稿
 
   info       显示系统信息
 ```
