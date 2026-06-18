@@ -376,3 +376,42 @@ class TestSnapshotCliEndToEnd:
         with open(batch_files[0], "r", encoding="utf-8") as f:
             data = json.load(f)
         return data.get("config_version", 0)
+
+    def test_export_version_after_three_rule_changes_cli(self):
+        self._run(["rules", "set-duplicate", "rename"], self.workspace_a)
+        self._run(["rules", "add-ext", ".heic"], self.workspace_a)
+        self._run(
+            ["rules", "set-template", "{point.category}/{point.id}_{point.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"],
+            self.workspace_a,
+        )
+
+        result = self._run(
+            ["snapshot", "export", "-o", str(self.snapshot_file), "--name", "版本号测试"],
+            self.workspace_a,
+        )
+
+        assert result.exit_code == 0
+        assert "配置版本: v4" in result.output
+
+        with open(self.snapshot_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["config_version"] == 4
+
+    def test_import_sync_batch_count_matches_actual_batches_cli(self):
+        self._run(["rules", "set-duplicate", "rename"], self.workspace_a)
+        self._run(["rules", "add-ext", ".heic"], self.workspace_a)
+        self._run(
+            ["snapshot", "export", "-o", str(self.snapshot_file), "--name", "批次数测试"],
+            self.workspace_a,
+        )
+
+        self._run(["batch", "new", "--name", "旧批次1"], self.workspace_b)
+        self._run(["batch", "new", "--name", "旧批次2"], self.workspace_b)
+
+        result = self._run(
+            ["snapshot", "import", "-f", str(self.snapshot_file), "--force"],
+            self.workspace_b,
+        )
+
+        assert result.exit_code == 0
+        assert "已同步批次: 2 个" in result.output
