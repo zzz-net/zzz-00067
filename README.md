@@ -215,7 +215,7 @@ patrol snapshot show
 # 先按需要调整规则
 patrol rules set-duplicate rename
 patrol rules add-ext .heic
-patrol rules set-template "{point.category}/{point.id}_{photo.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"
+patrol rules set-template "{point.category}/{point.id}_{point.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"
 
 # 导出快照
 patrol snapshot export -o ./snapshots/prod_rules.json \

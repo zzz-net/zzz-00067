@@ -415,3 +415,110 @@ class TestSnapshotCliEndToEnd:
 
         assert result.exit_code == 0
         assert "已同步批次: 2 个" in result.output
+
+    def _setup_sample_data(self, workspace: Path):
+        project = Path(__file__).resolve().parent.parent
+        sample = project / "sample"
+        self._run(
+            ["import", "--csv", str(sample / "points.csv"),
+             "--notes", str(sample / "notes.json"), "--batch-name", "测试"],
+            workspace,
+        )
+        self._run(["scan", "--dir", str(sample / "photos")], workspace)
+
+    def _batch_metrics(self, workspace: Path):
+        batches_dir = workspace / ".patrol-archiver" / "batches"
+        batch_files = sorted(batches_dir.glob("batch_*.json"))
+        if not batch_files:
+            return 0, 0
+        with open(batch_files[0], "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return len(data.get("previews", [])), len(data.get("conflicts", []))
+
+    def _batch_conflicts(self, workspace: Path) -> list:
+        batches_dir = workspace / ".patrol-archiver" / "batches"
+        batch_files = sorted(batches_dir.glob("batch_*.json"))
+        if not batch_files:
+            return []
+        with open(batch_files[0], "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("conflicts", [])
+
+    def test_photo_name_alias_backward_compat_preview_ok_cli(self):
+        bad_template = "{point.category}/{point.id}_{photo.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"
+        self._run(["rules", "set-template", bad_template], self.workspace_a)
+        self._run(
+            ["snapshot", "export", "-o", str(self.snapshot_file), "--name", "误用模板快照"],
+            self.workspace_a,
+        )
+        self._run(
+            ["snapshot", "import", "-f", str(self.snapshot_file), "--force"],
+            self.workspace_b,
+        )
+        self._setup_sample_data(self.workspace_b)
+        preview_result = self._run(["preview"], self.workspace_b)
+        assert preview_result.exit_code == 0
+
+        previews, _ = self._batch_metrics(self.workspace_b)
+        render_fails = [
+            c for c in self._batch_conflicts(self.workspace_b)
+            if "模板渲染失败" in (c.get("reason", "") or "")
+        ]
+        assert previews > 0, (
+            f"应生成预览项，实际 {previews} 个，"
+            f"模板渲染失败冲突: {len(render_fails)}"
+        )
+
+    def test_set_template_photo_name_emits_alias_warning_cli(self):
+        result = self._run(
+            ["rules", "set-template", "{photo.name}_{photo.taken_at:%Y%m%d}{photo.source_path.suffix}"],
+            self.workspace_a,
+        )
+        assert result.exit_code == 0
+        assert "别名" in result.output
+        assert "photo.file_name" in result.output
+
+    def test_snapshot_import_photo_name_emits_alias_warning_cli(self):
+        bad_template = "{point.id}_{photo.name}_{photo.source_path.suffix}"
+        self._run(["rules", "set-template", bad_template], self.workspace_a)
+        self._run(
+            ["snapshot", "export", "-o", str(self.snapshot_file), "--name", "含别名快照"],
+            self.workspace_a,
+        )
+        result = self._run(
+            ["snapshot", "import", "-f", str(self.snapshot_file), "--force"],
+            self.workspace_b,
+        )
+        assert result.exit_code == 0
+        assert "别名" in result.output
+
+    def test_set_template_unknown_variable_warning_cli(self):
+        result = self._run(
+            ["rules", "set-template", "{photo.nonexist}_{point.id}"],
+            self.workspace_a,
+        )
+        assert result.exit_code == 0
+        assert "未知模板变量" in result.output
+
+    def test_readme_snapshot_example_template_preview_ok_cli(self):
+        readme_tpl = "{point.category}/{point.id}_{point.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"
+        self._run(["rules", "set-template", readme_tpl], self.workspace_a)
+        self._run(
+            ["snapshot", "export", "-o", str(self.snapshot_file), "--name", "README示例"],
+            self.workspace_a,
+        )
+        self._run(
+            ["snapshot", "import", "-f", str(self.snapshot_file), "--force"],
+            self.workspace_b,
+        )
+        self._setup_sample_data(self.workspace_b)
+        preview_result = self._run(["preview"], self.workspace_b)
+        assert preview_result.exit_code == 0
+
+        previews, _ = self._batch_metrics(self.workspace_b)
+        template_errors = [
+            c for c in self._batch_conflicts(self.workspace_b)
+            if "模板渲染失败" in (c.get("reason", "") or "")
+        ]
+        assert previews >= 9
+        assert len(template_errors) == 0, f"存在模板渲染失败: {template_errors[:3]}"

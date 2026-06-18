@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "snapshot_20260619_045350_83e4786f",
+  "created_at": "2026-06-19T04:53:50.643268",
+  "created_by": "reviewer",
+  "name": "非法模板规则",
+  "description": "",
+  "config_version": 2,
+  "naming_template": "{photo.nonexist}_{point.id}.jpg",
+  "allowed_extensions": [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".bmp",
+    ".tiff",
+    ".webp"
+  ],
+  "duplicate_strategy": "block",
+  "archive_action": "copy",
+  "archive_dir": "archive",
+  "photo_dir": "photos",
+  "notes_json": "notes.json",
+  "points_csv": "points.csv",
+  "default_author": "user"
+}

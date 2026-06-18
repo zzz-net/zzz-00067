@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "snapshot_20260619_045040_777058a3",
+  "created_at": "2026-06-19T04:50:40.744244",
+  "created_by": "张三",
+  "name": "生产环境规则",
+  "description": "2026年6月生产环境归档规则",
+  "config_version": 4,
+  "naming_template": "{point.category}/{point.id}_{point.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}",
+  "allowed_extensions": [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".bmp",
+    ".tiff",
+    ".webp",
+    ".heic"
+  ],
+  "duplicate_strategy": "rename",
+  "archive_action": "copy",
+  "archive_dir": "archive",
+  "photo_dir": "photos",
+  "notes_json": "notes.json",
+  "points_csv": "points.csv",
+  "default_author": "user"
+}

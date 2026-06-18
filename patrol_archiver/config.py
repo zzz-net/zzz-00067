@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from .models import (
     ArchiverConfig,
@@ -19,6 +20,13 @@ from .models import (
 
 
 class ConfigManager:
+    VALID_POINT_ATTRS = {"id", "name", "category", "location", "description"}
+    VALID_PHOTO_ATTRS = {
+        "source_path", "file_name", "name", "file_size",
+        "file_hash", "taken_at", "camera", "point_id",
+    }
+    PHOTO_ATTR_ALIASES = {"name": "file_name"}
+
     def __init__(self, workspace: Path):
         self.workspace = Path(workspace).resolve()
         self.config_dir = self.workspace / ".patrol-archiver"
@@ -88,6 +96,40 @@ class ConfigManager:
         config.duplicate_strategy = strategy
         self.save(config)
         return self._config
+
+    @classmethod
+    def validate_naming_template(cls, template: str) -> Tuple[bool, List[str]]:
+        """校验命名模板中使用的变量是否合法。
+
+        返回 (是否合法, 警告列表)。
+        注：photo.name 视为合法别名（等价于 photo.file_name），但会提示。
+        """
+        warnings: List[str] = []
+        photo_refs = re.findall(r"\{photo\.([a-zA-Z_][a-zA-Z0-9_]*)", template)
+        point_refs = re.findall(r"\{point\.([a-zA-Z_][a-zA-Z0-9_]*)", template)
+
+        for attr in photo_refs:
+            base_attr = attr.split(".")[0]
+            if base_attr not in cls.VALID_PHOTO_ATTRS:
+                warnings.append(
+                    f"未知模板变量 {{photo.{attr}}}，"
+                    f"photo 可用变量: {sorted(cls.VALID_PHOTO_ATTRS)}"
+                )
+            elif base_attr in cls.PHOTO_ATTR_ALIASES:
+                canonical = cls.PHOTO_ATTR_ALIASES[base_attr]
+                warnings.append(
+                    f"变量 {{photo.{attr}}} 是别名，推荐使用 {{photo.{canonical}}}（两者等价）"
+                )
+
+        for attr in point_refs:
+            base_attr = attr.split(".")[0]
+            if base_attr not in cls.VALID_POINT_ATTRS:
+                warnings.append(
+                    f"未知模板变量 {{point.{attr}}}，"
+                    f"point 可用变量: {sorted(cls.VALID_POINT_ATTRS)}"
+                )
+
+        return (len([w for w in warnings if w.startswith("未知")]) == 0, warnings)
 
     def set_archive_action(self, action: ArchiveAction) -> ArchiverConfig:
         config = self.load()

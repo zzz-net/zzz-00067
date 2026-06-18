@@ -310,11 +310,14 @@ def rules_set_template(ctx, template: str):
     """
     workspace = get_workspace(ctx)
     config_mgr = ConfigManager(workspace)
+    is_valid, warnings = config_mgr.validate_naming_template(template)
     config = config_mgr.update_naming_template(template)
     sync_batch_config_version(workspace, config.version)
     console.print(f"[green]✓ 命名模板已更新[/green]")
     console.print(f"  新版本: v{config.version}")
     console.print(f"  模板: {config.naming_template}")
+    for w in warnings:
+        console.print(f"  [yellow]⚠ {w}[/yellow]")
 
 
 @rules.command("add-ext")
@@ -536,10 +539,14 @@ def snapshot_import(ctx, snapshot_file: Path, author: Optional[str], force: bool
     )
     store.add_snapshot_import_log(import_log)
 
+    _, tpl_warnings = config_mgr.validate_naming_template(applied_config.naming_template)
+
     console.print(f"\n[green]✓ 快照导入成功[/green]")
     console.print(f"  新配置版本: v{applied_config.version}")
     console.print(f"  已同步批次: {updated_count} 个")
     console.print(f"  操作已记录到日志")
+    for w in tpl_warnings:
+        console.print(f"  [yellow]⚠ 命名模板: {w}[/yellow]")
 
 
 @snapshot.command("log")

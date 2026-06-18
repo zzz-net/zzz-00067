@@ -290,6 +290,7 @@ class PreviewGenerator:
                 self._photo = photo
                 self.source_path = photo.source_path
                 self.file_name = photo.file_name
+                self.name = photo.file_name
                 self.file_size = photo.file_size
                 self.file_hash = photo.file_hash
                 self.taken_at = photo.taken_at or datetime.now()
