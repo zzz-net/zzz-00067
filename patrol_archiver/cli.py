@@ -21,7 +21,9 @@ from .exporter import ReportExporter
 from .models import (
     AnnotationStatus,
     ArchiveAction,
+    ConflictType,
     DuplicateStrategy,
+    SnapshotImportLog,
 )
 from .preview import PreviewGenerator
 from .scanner import PhotoScanner
@@ -260,7 +262,7 @@ def rules_show(ctx):
     config_mgr = ConfigManager(workspace)
     config = config_mgr.load()
 
-    console.print(Panel.fit(
+    content = (
         f"[bold]配置版本:[/bold] v{config.version}\n\n"
         f"[bold]命名模板:[/bold]\n  {config.naming_template}\n\n"
         f"[bold]允许的扩展名:[/bold] {', '.join(config.allowed_extensions)}\n\n"
@@ -269,9 +271,21 @@ def rules_show(ctx):
         f"[bold]归档目录:[/bold] {config.archive_dir}\n"
         f"[bold]照片目录:[/bold] {config.photo_dir}\n"
         f"[bold]点位 CSV:[/bold] {config.points_csv}\n"
-        f"[bold]备注 JSON:[/bold] {config.notes_json}",
-        title="当前规则配置",
-    ))
+        f"[bold]备注 JSON:[/bold] {config.notes_json}"
+    )
+
+    if config.last_snapshot and config.last_snapshot.imported_at:
+        ls = config.last_snapshot
+        content += (
+            f"\n\n[bold]最近快照导入:[/bold]\n"
+            f"  快照名称: {ls.snapshot_name}\n"
+            f"  快照版本: v{ls.snapshot_version}\n"
+            f"  导入时间: {ls.imported_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"  导入人: {ls.imported_by}\n"
+            f"  来源文件: {ls.source_path}"
+        )
+
+    console.print(Panel.fit(content, title="当前规则配置"))
 
 
 @rules.command("set-template")
@@ -379,6 +393,236 @@ def rules_set_archive_dir(ctx, dir_path: Path):
     sync_batch_config_version(workspace, config.version)
     console.print(f"[green]✓ 归档目录已设置为: {config.archive_dir}[/green]")
     console.print(f"  配置版本: v{config.version}")
+
+
+@cli.group()
+def snapshot():
+    """规则快照管理（导出、导入、查看日志）"""
+    pass
+
+
+@snapshot.command("export")
+@click.option("--output", "-o", type=click.Path(path_type=Path), required=True, help="快照输出文件路径")
+@click.option("--name", "-n", help="快照名称")
+@click.option("--description", "-d", help="快照描述")
+@click.option("--author", "-a", help="导出人")
+@click.pass_context
+def snapshot_export(ctx, output: Path, name: Optional[str], description: Optional[str], author: Optional[str]):
+    """导出当前规则为快照文件"""
+    workspace = get_workspace(ctx)
+    config_mgr = ConfigManager(workspace)
+    config = config_mgr.load()
+
+    if author is None:
+        author = config.default_author
+
+    snapshot = config_mgr.export_snapshot(
+        output_path=output,
+        name=name or "",
+        description=description or "",
+        author=author,
+    )
+
+    console.print(f"[green]✓ 规则快照已导出[/green]")
+    console.print(f"  快照ID: {snapshot.snapshot_id}")
+    console.print(f"  快照名称: {snapshot.name}")
+    console.print(f"  配置版本: v{snapshot.config_version}")
+    console.print(f"  导出人: {snapshot.created_by}")
+    console.print(f"  导出时间: {snapshot.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+    console.print(f"  文件路径: {output.resolve()}")
+
+
+@snapshot.command("import")
+@click.option("--file", "-f", "snapshot_file", type=click.Path(path_type=Path, exists=True), required=True, help="快照文件路径")
+@click.option("--author", "-a", help="导入人")
+@click.option("--force", is_flag=True, help="强制导入（跳过冲突确认）")
+@click.pass_context
+def snapshot_import(ctx, snapshot_file: Path, author: Optional[str], force: bool):
+    """导入规则快照（存在冲突时需确认）"""
+    workspace = get_workspace(ctx)
+    config_mgr = ConfigManager(workspace)
+    store = BatchStore(workspace)
+
+    try:
+        snapshot = config_mgr.load_snapshot(snapshot_file)
+    except Exception as e:
+        console.print(f"[red]✗ 加载快照失败: {e}[/red]")
+        sys.exit(1)
+
+    result = config_mgr.check_import_conflicts(snapshot, batch_store=store)
+
+    console.print(Panel.fit(
+        f"[bold]快照信息[/bold]\n"
+        f"  ID: {snapshot.snapshot_id}\n"
+        f"  名称: {snapshot.name}\n"
+        f"  描述: {snapshot.description or '(无)'}\n"
+        f"  配置版本: v{snapshot.config_version}\n"
+        f"  创建人: {snapshot.created_by}\n"
+        f"  创建时间: {snapshot.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"{result.message}",
+        title="导入规则快照",
+    ))
+
+    if result.conflicts:
+        console.print("\n[yellow]检测到以下冲突：[/yellow]")
+        conflict_table = Table(title="冲突列表")
+        conflict_table.add_column("#", justify="right")
+        conflict_table.add_column("类型")
+        conflict_table.add_column("字段")
+        conflict_table.add_column("当前值")
+        conflict_table.add_column("快照值")
+        conflict_table.add_column("说明")
+
+        type_labels = {
+            ConflictType.CONFIG_EXISTS: "配置存在",
+            ConflictType.BATCH_EXISTS: "批次存在",
+            ConflictType.VERSION_MISMATCH: "版本差异",
+            ConflictType.EXTENSION_CONFLICT: "扩展名",
+            ConflictType.TEMPLATE_CONFLICT: "命名模板",
+            ConflictType.STRATEGY_CONFLICT: "策略差异",
+        }
+
+        for i, conflict in enumerate(result.conflicts, 1):
+            conflict_table.add_row(
+                str(i),
+                type_labels.get(conflict.type, conflict.type.value),
+                conflict.field,
+                conflict.existing_value[:30] + "..." if len(conflict.existing_value) > 30 else conflict.existing_value,
+                conflict.incoming_value[:30] + "..." if len(conflict.incoming_value) > 30 else conflict.incoming_value,
+                conflict.message,
+            )
+
+        console.print(conflict_table)
+
+        if not force:
+            console.print("\n[yellow]请确认是否要继续导入？导入后将覆盖当前配置。[/yellow]")
+            confirm = click.confirm("是否继续？", default=False)
+            if not confirm:
+                console.print("[yellow]已取消导入[/yellow]")
+                sys.exit(0)
+
+    config = config_mgr.load()
+    version_before = config.version
+
+    if author is None:
+        author = config.default_author
+
+    applied_config = config_mgr.apply_snapshot(
+        snapshot=snapshot,
+        source_path=snapshot_file.resolve(),
+        author=author,
+    )
+
+    sync_batch_config_version(workspace, applied_config.version)
+
+    import_log = SnapshotImportLog(
+        id=f"log_{snapshot.snapshot_id}",
+        operation="snapshot_import",
+        author=author,
+        status="success",
+        message=f"成功导入快照 {snapshot.name}",
+        snapshot_id=snapshot.snapshot_id,
+        snapshot_name=snapshot.name,
+        snapshot_version=snapshot.config_version,
+        source_path=snapshot_file.resolve(),
+        conflicts_resolved=[c.type.value for c in result.conflicts],
+        config_version_before=version_before,
+        config_version_after=applied_config.version,
+    )
+    store.add_snapshot_import_log(import_log)
+
+    console.print(f"\n[green]✓ 快照导入成功[/green]")
+    console.print(f"  新配置版本: v{applied_config.version}")
+    console.print(f"  操作已记录到日志")
+
+
+@snapshot.command("log")
+@click.option("--limit", "-n", type=int, default=20, help="显示最近N条记录")
+@click.pass_context
+def snapshot_log(ctx, limit: int):
+    """查看快照导入操作日志"""
+    workspace = get_workspace(ctx)
+    store = BatchStore(workspace)
+
+    logs = store.list_snapshot_import_logs(limit=limit)
+
+    if not logs:
+        console.print("[yellow]暂无快照导入记录[/yellow]")
+        return
+
+    table = Table(title=f"快照导入日志（最近 {len(logs)} 条）")
+    table.add_column("时间")
+    table.add_column("操作人")
+    table.add_column("快照名称")
+    table.add_column("快照版本")
+    table.add_column("配置版本(前→后)")
+    table.add_column("状态")
+    table.add_column("冲突数")
+
+    for log in logs:
+        status_style = "green" if log.status == "success" else "red"
+        table.add_row(
+            log.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            log.author,
+            log.snapshot_name,
+            f"v{log.snapshot_version}",
+            f"v{log.config_version_before} → v{log.config_version_after}",
+            Text(log.status, style=status_style),
+            str(len(log.conflicts_resolved)),
+        )
+
+    console.print(table)
+
+
+@snapshot.command("show")
+@click.option("--file", "-f", "snapshot_file", type=click.Path(path_type=Path, exists=True), help="查看指定快照文件内容")
+@click.pass_context
+def snapshot_show(ctx, snapshot_file: Optional[Path]):
+    """查看当前快照信息或指定快照文件内容"""
+    workspace = get_workspace(ctx)
+
+    if snapshot_file:
+        config_mgr = ConfigManager(workspace)
+        try:
+            snapshot = config_mgr.load_snapshot(snapshot_file)
+        except Exception as e:
+            console.print(f"[red]✗ 加载快照失败: {e}[/red]")
+            sys.exit(1)
+
+        console.print(Panel.fit(
+            f"[bold]快照ID:[/bold] {snapshot.snapshot_id}\n"
+            f"[bold]名称:[/bold] {snapshot.name}\n"
+            f"[bold]描述:[/bold] {snapshot.description or '(无)'}\n"
+            f"[bold]配置版本:[/bold] v{snapshot.config_version}\n"
+            f"[bold]创建人:[/bold] {snapshot.created_by}\n"
+            f"[bold]创建时间:[/bold] {snapshot.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"[bold]命名模板:[/bold]\n  {snapshot.naming_template}\n\n"
+            f"[bold]允许的扩展名:[/bold] {', '.join(snapshot.allowed_extensions)}\n\n"
+            f"[bold]重复策略:[/bold] {snapshot.duplicate_strategy.value}\n"
+            f"[bold]归档方式:[/bold] {snapshot.archive_action.value}\n\n"
+            f"[bold]归档目录:[/bold] {snapshot.archive_dir}\n"
+            f"[bold]照片目录:[/bold] {snapshot.photo_dir}\n"
+            f"[bold]点位 CSV:[/bold] {snapshot.points_csv}\n"
+            f"[bold]备注 JSON:[/bold] {snapshot.notes_json}",
+            title=f"快照内容: {snapshot.name}",
+        ))
+    else:
+        config_mgr = ConfigManager(workspace)
+        config = config_mgr.load()
+
+        if config.last_snapshot and config.last_snapshot.imported_at:
+            ls = config.last_snapshot
+            console.print(Panel.fit(
+                f"[bold]快照名称:[/bold] {ls.snapshot_name}\n"
+                f"[bold]快照版本:[/bold] v{ls.snapshot_version}\n"
+                f"[bold]来源文件:[/bold] {ls.source_path}\n"
+                f"[bold]导入时间:[/bold] {ls.imported_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"[bold]导入人:[/bold] {ls.imported_by}",
+                title="最近导入的快照",
+            ))
+        else:
+            console.print("[yellow]当前工作区尚未导入过规则快照[/yellow]")
+            console.print("使用 'snapshot import' 命令导入快照，或使用 'snapshot show -f <文件>' 查看快照内容")
 
 
 @cli.command("scan")
@@ -920,7 +1164,7 @@ def show_info(ctx):
     batches = store.list_batches()
     current = store.get_current_batch()
 
-    console.print(Panel.fit(
+    info_content = (
         f"[bold]工作目录:[/bold] {workspace}\n"
         f"[bold]配置版本:[/bold] v{config.version}\n"
         f"[bold]命名模板:[/bold] {config.naming_template}\n"
@@ -929,9 +1173,21 @@ def show_info(ctx):
         f"[bold]归档方式:[/bold] {config.archive_action.value}\n\n"
         f"[bold]批次总数:[/bold] {len(batches)}\n"
         f"[bold]当前批次:[/bold] {current.name if current else '(无)'}\n"
-        f"[bold]数据目录:[/bold] {workspace / '.patrol-archiver'}",
-        title="系统信息",
-    ))
+        f"[bold]数据目录:[/bold] {workspace / '.patrol-archiver'}"
+    )
+
+    if config.last_snapshot and config.last_snapshot.imported_at:
+        ls = config.last_snapshot
+        info_content += (
+            f"\n\n[bold]最近快照导入:[/bold]\n"
+            f"  快照名称: {ls.snapshot_name}\n"
+            f"  快照版本: v{ls.snapshot_version}\n"
+            f"  导入时间: {ls.imported_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"  导入人: {ls.imported_by}\n"
+            f"  来源: {ls.source_path}"
+        )
+
+    console.print(Panel.fit(info_content, title="系统信息"))
 
 
 def main():

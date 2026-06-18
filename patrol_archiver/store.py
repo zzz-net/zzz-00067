@@ -13,9 +13,11 @@ from .models import (
     Batch,
     Conflict,
     NoteEntry,
+    OperationLogEntry,
     Photo,
     Point,
     PreviewItem,
+    SnapshotImportLog,
     UndoRecord,
 )
 
@@ -26,6 +28,7 @@ class BatchStore:
         self.data_dir = self.workspace / ".patrol-archiver"
         self.batches_dir = self.data_dir / "batches"
         self.current_batch_file = self.data_dir / "current_batch.json"
+        self.operation_log_file = self.data_dir / "operation_log.jsonl"
         self._current_batch: Optional[Batch] = None
 
     def ensure_dirs(self) -> None:
@@ -261,3 +264,55 @@ class BatchStore:
         if photo_dir:
             batch.photo_dir = Path(photo_dir)
         self._save_batch(batch)
+
+    def add_operation_log(self, entry: OperationLogEntry) -> None:
+        self.ensure_dirs()
+        with open(self.operation_log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry.model_dump(mode="json"), ensure_ascii=False) + "\n")
+
+    def list_operation_logs(self, limit: int = 50, operation: Optional[str] = None) -> List[OperationLogEntry]:
+        if not self.operation_log_file.exists():
+            return []
+
+        logs: List[OperationLogEntry] = []
+        with open(self.operation_log_file, "r", encoding="utf-8") as f:
+            for line in reversed(f.readlines()):
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                    entry = OperationLogEntry.model_validate(data)
+                    if operation and entry.operation != operation:
+                        continue
+                    logs.append(entry)
+                    if len(logs) >= limit:
+                        break
+                except Exception:
+                    continue
+
+        return logs
+
+    def add_snapshot_import_log(self, log: SnapshotImportLog) -> None:
+        self.add_operation_log(log)
+
+    def list_snapshot_import_logs(self, limit: int = 50) -> List[SnapshotImportLog]:
+        if not self.operation_log_file.exists():
+            return []
+
+        logs: List[SnapshotImportLog] = []
+        with open(self.operation_log_file, "r", encoding="utf-8") as f:
+            for line in reversed(f.readlines()):
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                    if data.get("operation") != "snapshot_import":
+                        continue
+                    entry = SnapshotImportLog.model_validate(data)
+                    logs.append(entry)
+                    if len(logs) >= limit:
+                        break
+                except Exception:
+                    continue
+
+        return logs

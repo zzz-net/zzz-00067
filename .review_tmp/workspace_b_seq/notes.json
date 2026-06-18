@@ -1,0 +1,25 @@
+{
+  "P001": {
+    "description": "高压配电室日常巡检，温度25°C，湿度60%",
+    "inspector": "张三",
+    "equipment_type": "变压器",
+    "last_maintenance": "2026-03-15"
+  },
+  "P002": {
+    "description": "消防栓压力检查，压力值0.8MPa，正常范围",
+    "inspector": "李四",
+    "pressure_mpa": "0.8",
+    "next_check": "2026-07-01"
+  },
+  "P003": {
+    "description": "电梯机房季度巡检，油位正常，无异常噪音",
+    "inspector": "王五",
+    "elevator_model": "XYZ-2000",
+    "service_company": "电梯维保A公司"
+  },
+  "P005": {
+    "description": "水泵运行电流20A，出口压力0.6MPa",
+    "inspector": "赵六",
+    "pump_status": "normal"
+  }
+}

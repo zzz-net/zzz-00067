@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "snapshot_20260619_025607_9e37ad19",
+  "created_at": "2026-06-19T02:56:07.539135",
+  "created_by": "reviewer",
+  "name": "reviewer snapshot",
+  "description": "manual review snapshot",
+  "config_version": 5,
+  "naming_template": "snapshots/{point.id}_{photo.file_name}",
+  "allowed_extensions": [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".bmp",
+    ".tiff",
+    ".webp",
+    ".heic"
+  ],
+  "duplicate_strategy": "rename",
+  "archive_action": "copy",
+  "archive_dir": "migrated-archive",
+  "photo_dir": "photos",
+  "notes_json": "notes.json",
+  "points_csv": "points.csv",
+  "default_author": "user"
+}

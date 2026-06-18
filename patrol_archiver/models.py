@@ -155,6 +155,19 @@ class Batch(BaseModel):
         return Path(v) if v else v
 
 
+class LastSnapshotInfo(BaseModel):
+    source_path: Optional[Path] = None
+    snapshot_version: Optional[int] = None
+    imported_at: Optional[datetime] = None
+    imported_by: str = "user"
+    snapshot_name: str = ""
+
+    @field_validator("source_path", mode="before")
+    @classmethod
+    def _convert_source_path(cls, v):
+        return Path(v) if v else v
+
+
 class ArchiverConfig(BaseModel):
     version: int = 1
     naming_template: str = "{point.category}/{point.id}_{point.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"
@@ -166,6 +179,7 @@ class ArchiverConfig(BaseModel):
     notes_json: Path = Path("./notes.json")
     points_csv: Path = Path("./points.csv")
     default_author: str = "user"
+    last_snapshot: Optional[LastSnapshotInfo] = None
 
     @field_validator("archive_dir", "photo_dir", "notes_json", "points_csv", mode="before")
     @classmethod
@@ -176,3 +190,82 @@ class ArchiverConfig(BaseModel):
     @classmethod
     def _normalize_extensions(cls, v):
         return [ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in v]
+
+
+class RuleSnapshot(BaseModel):
+    schema_version: int = 1
+    snapshot_id: str
+    created_at: datetime
+    created_by: str = "user"
+    name: str = ""
+    description: str = ""
+    config_version: int
+    naming_template: str
+    allowed_extensions: List[str]
+    duplicate_strategy: DuplicateStrategy
+    archive_action: ArchiveAction
+    archive_dir: Path
+    photo_dir: Path
+    notes_json: Path
+    points_csv: Path
+    default_author: str = "user"
+
+    @field_validator("archive_dir", "photo_dir", "notes_json", "points_csv", mode="before")
+    @classmethod
+    def _convert_snapshot_paths(cls, v):
+        return Path(v) if v else v
+
+    @field_validator("allowed_extensions")
+    @classmethod
+    def _normalize_snapshot_extensions(cls, v):
+        return [ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in v]
+
+
+class ConflictType(str, Enum):
+    CONFIG_EXISTS = "config_exists"
+    BATCH_EXISTS = "batch_exists"
+    VERSION_MISMATCH = "version_mismatch"
+    EXTENSION_CONFLICT = "extension_conflict"
+    TEMPLATE_CONFLICT = "template_conflict"
+    STRATEGY_CONFLICT = "strategy_conflict"
+
+
+class SnapshotConflict(BaseModel):
+    type: ConflictType
+    field: str = ""
+    existing_value: str = ""
+    incoming_value: str = ""
+    message: str
+
+
+class ImportResult(BaseModel):
+    success: bool = False
+    applied: bool = False
+    conflicts: List[SnapshotConflict] = Field(default_factory=list)
+    message: str = ""
+    snapshot: Optional[RuleSnapshot] = None
+
+
+class OperationLogEntry(BaseModel):
+    id: str
+    timestamp: datetime = Field(default_factory=datetime.now)
+    operation: str
+    author: str = "user"
+    details: Dict[str, Any] = Field(default_factory=dict)
+    status: str = "success"
+    message: str = ""
+
+
+class SnapshotImportLog(OperationLogEntry):
+    snapshot_id: str = ""
+    snapshot_name: str = ""
+    snapshot_version: int = 0
+    source_path: Optional[Path] = None
+    conflicts_resolved: List[str] = Field(default_factory=list)
+    config_version_before: int = 0
+    config_version_after: int = 0
+
+    @field_validator("source_path", mode="before")
+    @classmethod
+    def _convert_log_source_path(cls, v):
+        return Path(v) if v else v
