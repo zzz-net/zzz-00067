@@ -49,7 +49,7 @@ class ConfigManager:
     def update_naming_template(self, template: str) -> ArchiverConfig:
         config = self.load()
         config.naming_template = template
-        self.save()
+        self.save(config)
         return config
 
     def add_extension(self, ext: str) -> ArchiverConfig:
@@ -57,7 +57,7 @@ class ConfigManager:
         ext = ext.lower() if ext.startswith(".") else f".{ext.lower()}"
         if ext not in config.allowed_extensions:
             config.allowed_extensions.append(ext)
-            self.save()
+            self.save(config)
         return config
 
     def remove_extension(self, ext: str) -> ArchiverConfig:
@@ -65,43 +65,43 @@ class ConfigManager:
         ext = ext.lower() if ext.startswith(".") else f".{ext.lower()}"
         if ext in config.allowed_extensions:
             config.allowed_extensions.remove(ext)
-            self.save()
+            self.save(config)
         return config
 
     def set_duplicate_strategy(self, strategy: DuplicateStrategy) -> ArchiverConfig:
         config = self.load()
         config.duplicate_strategy = strategy
-        self.save()
+        self.save(config)
         return config
 
     def set_archive_action(self, action: ArchiveAction) -> ArchiverConfig:
         config = self.load()
         config.archive_action = action
-        self.save()
+        self.save(config)
         return config
 
     def set_archive_dir(self, path: Path) -> ArchiverConfig:
         config = self.load()
         config.archive_dir = Path(path)
-        self.save()
+        self.save(config)
         return config
 
     def set_photo_dir(self, path: Path) -> ArchiverConfig:
         config = self.load()
         config.photo_dir = Path(path)
-        self.save()
+        self.save(config)
         return config
 
     def set_notes_json(self, path: Path) -> ArchiverConfig:
         config = self.load()
         config.notes_json = Path(path)
-        self.save()
+        self.save(config)
         return config
 
     def set_points_csv(self, path: Path) -> ArchiverConfig:
         config = self.load()
         config.points_csv = Path(path)
-        self.save()
+        self.save(config)
         return config
 
     def get_config_version(self) -> int:

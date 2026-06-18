@@ -39,6 +39,13 @@ def get_workspace(ctx) -> Path:
     return Path(ctx.obj["workspace"]).resolve()
 
 
+def sync_batch_config_version(workspace: Path, config_version: int) -> None:
+    store = BatchStore(workspace)
+    batch = store.get_current_batch()
+    if batch:
+        store.update_config_version(batch, config_version)
+
+
 def get_or_create_batch(ctx, require_existing: bool = False):
     workspace = get_workspace(ctx)
     store = BatchStore(workspace)
@@ -285,6 +292,7 @@ def rules_set_template(ctx, template: str):
     workspace = get_workspace(ctx)
     config_mgr = ConfigManager(workspace)
     config = config_mgr.update_naming_template(template)
+    sync_batch_config_version(workspace, config.version)
     console.print(f"[green]✓ 命名模板已更新[/green]")
     console.print(f"  新版本: v{config.version}")
     console.print(f"  模板: {config.naming_template}")
@@ -298,6 +306,7 @@ def rules_add_ext(ctx, extension: str):
     workspace = get_workspace(ctx)
     config_mgr = ConfigManager(workspace)
     config = config_mgr.add_extension(extension)
+    sync_batch_config_version(workspace, config.version)
     console.print(f"[green]✓ 已添加扩展名[/green]")
     console.print(f"  当前允许: {', '.join(config.allowed_extensions)}")
 
@@ -310,6 +319,7 @@ def rules_remove_ext(ctx, extension: str):
     workspace = get_workspace(ctx)
     config_mgr = ConfigManager(workspace)
     config = config_mgr.remove_extension(extension)
+    sync_batch_config_version(workspace, config.version)
     console.print(f"[green]✓ 已移除扩展名[/green]")
     console.print(f"  当前允许: {', '.join(config.allowed_extensions)}")
 
@@ -332,7 +342,9 @@ def rules_set_duplicate(ctx, strategy: str):
     config_mgr = ConfigManager(workspace)
     strategy_enum = DuplicateStrategy(strategy.lower())
     config = config_mgr.set_duplicate_strategy(strategy_enum)
+    sync_batch_config_version(workspace, config.version)
     console.print(f"[green]✓ 重复策略已设置为: {config.duplicate_strategy.value}[/green]")
+    console.print(f"  配置版本: v{config.version}")
 
 
 @rules.command("set-action")
@@ -351,7 +363,9 @@ def rules_set_action(ctx, action: str):
     config_mgr = ConfigManager(workspace)
     action_enum = ArchiveAction(action.lower())
     config = config_mgr.set_archive_action(action_enum)
+    sync_batch_config_version(workspace, config.version)
     console.print(f"[green]✓ 归档方式已设置为: {config.archive_action.value}[/green]")
+    console.print(f"  配置版本: v{config.version}")
 
 
 @rules.command("set-archive-dir")
@@ -362,7 +376,9 @@ def rules_set_archive_dir(ctx, dir_path: Path):
     workspace = get_workspace(ctx)
     config_mgr = ConfigManager(workspace)
     config = config_mgr.set_archive_dir(dir_path)
+    sync_batch_config_version(workspace, config.version)
     console.print(f"[green]✓ 归档目录已设置为: {config.archive_dir}[/green]")
+    console.print(f"  配置版本: v{config.version}")
 
 
 @cli.command("scan")

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 4,
   "naming_template": "{point.category}/{point.id}_{point.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}",
   "allowed_extensions": [
     ".jpg",
@@ -10,9 +10,9 @@
     ".tiff",
     ".webp"
   ],
-  "duplicate_strategy": "rename",
-  "archive_action": "copy",
-  "archive_dir": "d:\\workSpace\\AI__SPACE\\zzz-00067\\sample\\archive",
+  "duplicate_strategy": "block",
+  "archive_action": "move",
+  "archive_dir": "archive",
   "photo_dir": "photos",
   "notes_json": "notes.json",
   "points_csv": "points.csv",

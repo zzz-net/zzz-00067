@@ -167,7 +167,7 @@ class BatchStore:
             id=undo_id,
             action_type="update_annotation",
             description=f"更新点位 {point_id} 状态为 {status.value}",
-            previous_state={"annotation_id": annotation.id, "state": prev_state},
+            previous_state={"point_id": point_id, "state": prev_state},
         ))
 
         self._save_batch(batch)
@@ -194,7 +194,7 @@ class BatchStore:
             id=undo_id,
             action_type="add_note",
             description=f"为点位 {point_id} 添加备注",
-            previous_state={"annotation_id": annotation.id, "state": prev_state},
+            previous_state={"point_id": point_id, "state": prev_state},
         ))
 
         self._save_batch(batch)
@@ -207,10 +207,14 @@ class BatchStore:
         undo_record = batch.undo_stack.pop()
 
         if undo_record.action_type in ("update_annotation", "add_note"):
-            ann_id = undo_record.previous_state["annotation_id"]
-            prev_state = undo_record.previous_state["state"]
-            if ann_id in batch.annotations:
-                batch.annotations[ann_id] = Annotation.model_validate(prev_state)
+            prev_state = undo_record.previous_state.get("state")
+            point_id = undo_record.previous_state.get("point_id")
+            if point_id is None:
+                ann_id = undo_record.previous_state.get("annotation_id", "")
+                if ann_id.startswith("ann_"):
+                    point_id = ann_id[4:]
+            if point_id and prev_state and point_id in batch.annotations:
+                batch.annotations[point_id] = Annotation.model_validate(prev_state)
 
         self._save_batch(batch)
         return undo_record

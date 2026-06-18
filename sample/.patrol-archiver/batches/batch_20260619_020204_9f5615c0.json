@@ -1,0 +1,188 @@
+{
+  "id": "batch_20260619_020204_9f5615c0",
+  "name": "撤销测试",
+  "created_at": "2026-06-19T02:02:04.064060",
+  "updated_at": "2026-06-19T02:03:39.278388",
+  "config_version": 4,
+  "points": {
+    "P001": {
+      "id": "P001",
+      "name": "高压配电室巡检",
+      "category": "电气设备",
+      "location": "1号厂房一层",
+      "description": "日常巡检，设备运行正常",
+      "custom_fields": {}
+    },
+    "P002": {
+      "id": "P002",
+      "name": "消防栓检查",
+      "category": "消防安全",
+      "location": "1号厂房二层",
+      "description": "压力正常",
+      "custom_fields": {}
+    },
+    "P003": {
+      "id": "P003",
+      "name": "电梯机房",
+      "category": "特种设备",
+      "location": "2号厂房顶层",
+      "description": "季度巡检",
+      "custom_fields": {}
+    },
+    "P004": {
+      "id": "P004",
+      "name": "应急照明测试",
+      "category": "消防安全",
+      "location": "各楼层",
+      "description": "月度测试",
+      "custom_fields": {}
+    },
+    "P005": {
+      "id": "P005",
+      "name": "水泵房检查",
+      "category": "给排水",
+      "location": "地下一层",
+      "description": "运行状态良好",
+      "custom_fields": {}
+    },
+    "P006": {
+      "id": "P006",
+      "name": "发电机房",
+      "category": "电气设备",
+      "location": "地下一层",
+      "description": "备用电源检查",
+      "custom_fields": {}
+    },
+    "P007": {
+      "id": "P007",
+      "name": "门禁系统检查",
+      "category": "安保",
+      "location": "主入口",
+      "description": "读卡器正常",
+      "custom_fields": {}
+    },
+    "P008": {
+      "id": "P008",
+      "name": "监控摄像头",
+      "category": "安保",
+      "location": "各区域",
+      "description": "画面清晰",
+      "custom_fields": {}
+    },
+    "P009": {
+      "id": "P009",
+      "name": "防雷接地检测",
+      "category": "电气安全",
+      "location": "屋面",
+      "description": "接地电阻合格",
+      "custom_fields": {}
+    },
+    "P010": {
+      "id": "P010",
+      "name": "灭火器检查",
+      "category": "消防安全",
+      "location": "各楼层",
+      "description": "有效期内",
+      "custom_fields": {}
+    }
+  },
+  "photos": {},
+  "annotations": {
+    "P001": {
+      "id": "ann_P001",
+      "point_id": "P001",
+      "photo_id": null,
+      "status": "pending",
+      "notes": [],
+      "created_at": "2026-06-19T02:02:04.087494",
+      "updated_at": "2026-06-19T02:02:04.087494"
+    },
+    "P002": {
+      "id": "ann_P002",
+      "point_id": "P002",
+      "photo_id": null,
+      "status": "pending",
+      "notes": [],
+      "created_at": "2026-06-19T02:02:04.087494",
+      "updated_at": "2026-06-19T02:02:04.087494"
+    },
+    "P003": {
+      "id": "ann_P003",
+      "point_id": "P003",
+      "photo_id": null,
+      "status": "pending",
+      "notes": [],
+      "created_at": "2026-06-19T02:02:04.087494",
+      "updated_at": "2026-06-19T02:02:04.087494"
+    },
+    "P004": {
+      "id": "ann_P004",
+      "point_id": "P004",
+      "photo_id": null,
+      "status": "pending",
+      "notes": [],
+      "created_at": "2026-06-19T02:02:04.087494",
+      "updated_at": "2026-06-19T02:02:04.087494"
+    },
+    "P005": {
+      "id": "ann_P005",
+      "point_id": "P005",
+      "photo_id": null,
+      "status": "pending",
+      "notes": [],
+      "created_at": "2026-06-19T02:02:04.087494",
+      "updated_at": "2026-06-19T02:02:04.087494"
+    },
+    "P006": {
+      "id": "ann_P006",
+      "point_id": "P006",
+      "photo_id": null,
+      "status": "pending",
+      "notes": [],
+      "created_at": "2026-06-19T02:02:04.087494",
+      "updated_at": "2026-06-19T02:02:04.087494"
+    },
+    "P007": {
+      "id": "ann_P007",
+      "point_id": "P007",
+      "photo_id": null,
+      "status": "pending",
+      "notes": [],
+      "created_at": "2026-06-19T02:02:04.087494",
+      "updated_at": "2026-06-19T02:02:04.087494"
+    },
+    "P008": {
+      "id": "ann_P008",
+      "point_id": "P008",
+      "photo_id": null,
+      "status": "pending",
+      "notes": [],
+      "created_at": "2026-06-19T02:02:04.087494",
+      "updated_at": "2026-06-19T02:02:04.087494"
+    },
+    "P009": {
+      "id": "ann_P009",
+      "point_id": "P009",
+      "photo_id": null,
+      "status": "pending",
+      "notes": [],
+      "created_at": "2026-06-19T02:02:04.087494",
+      "updated_at": "2026-06-19T02:02:04.087494"
+    },
+    "P010": {
+      "id": "ann_P010",
+      "point_id": "P010",
+      "photo_id": null,
+      "status": "pending",
+      "notes": [],
+      "created_at": "2026-06-19T02:02:04.087494",
+      "updated_at": "2026-06-19T02:02:04.087494"
+    }
+  },
+  "previews": [],
+  "conflicts": [],
+  "undo_stack": [],
+  "notes_json_path": null,
+  "photo_dir": null,
+  "csv_path": "d:\\workSpace\\AI__SPACE\\zzz-00067\\sample\\points.csv"
+}
