@@ -21,7 +21,9 @@ from .exporter import ReportExporter
 from .models import (
     AnnotationStatus,
     ArchiveAction,
+    ArchiveDraft,
     ConflictType,
+    DraftRestoreResult,
     DuplicateStrategy,
     InvalidNamingTemplateError,
     SnapshotImportLog,
@@ -1184,6 +1186,223 @@ def export_csv(ctx, output: Path, no_notes: bool):
     )
 
     console.print(f"[green]✓ CSV 报告已导出到: {output_path}[/green]")
+
+
+@cli.group()
+def draft():
+    """归档方案草稿管理（保存、查看、恢复预览方案）"""
+    pass
+
+
+@draft.command("save")
+@click.argument("name")
+@click.option("--description", "-d", default="", help="草稿描述")
+@click.pass_context
+def draft_save(ctx, name: str, description: str):
+    """将当前批次的预览结果保存为草稿"""
+    batch = get_or_create_batch(ctx, require_existing=True)
+    store = ctx.obj["store"]
+    workspace = get_workspace(ctx)
+    config_mgr = ConfigManager(workspace)
+    config = config_mgr.load()
+
+    if not batch.previews:
+        console.print("[red]✗ 当前批次没有预览数据，请先运行 preview 命令[/red]")
+        sys.exit(1)
+
+    try:
+        draft = store.save_draft(batch, name=name, description=description, config=config)
+    except ValueError as e:
+        console.print(f"[red]✗ {e}[/red]")
+        sys.exit(1)
+
+    console.print(f"[green]✓ 草稿已保存[/green]")
+    console.print(f"  草稿 ID: {draft.id}")
+    console.print(f"  草稿名称: {draft.name}")
+    console.print(f"  创建时间: {draft.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+    console.print(f"  来源批次: {draft.source.batch_name}")
+    console.print(f"  规则版本: v{draft.config_version}")
+    console.print(f"  预览项数: {len(draft.previews)}")
+    console.print(f"  冲突: {draft.conflict_summary.total} (未解决 {draft.conflict_summary.unresolved})")
+
+
+@draft.command("list")
+@click.pass_context
+def draft_list(ctx):
+    """列出所有草稿"""
+    workspace = get_workspace(ctx)
+    store = BatchStore(workspace)
+    drafts = store.list_drafts()
+
+    if not drafts:
+        console.print("[yellow]暂无草稿[/yellow]")
+        return
+
+    table = Table(title="草稿列表")
+    table.add_column("ID", justify="left")
+    table.add_column("名称")
+    table.add_column("创建时间")
+    table.add_column("来源批次")
+    table.add_column("规则版本", justify="center")
+    table.add_column("预览项", justify="right")
+    table.add_column("冲突(未解决)", justify="right")
+
+    for d in drafts:
+        conflicts_display = f"{d['conflicts_total']} ({d['conflicts_unresolved']})"
+        table.add_row(
+            d["id"][:16],
+            d["name"],
+            d["created_at"].replace("T", " ")[:19] if isinstance(d["created_at"], str) else d["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+            d["source_batch_name"],
+            f"v{d['config_version']}",
+            str(d["previews_count"]),
+            conflicts_display,
+        )
+
+    console.print(table)
+
+
+@draft.command("show")
+@click.argument("draft_id")
+@click.pass_context
+def draft_show(ctx, draft_id: str):
+    """查看草稿详情"""
+    workspace = get_workspace(ctx)
+    store = BatchStore(workspace)
+    draft = store.load_draft(draft_id)
+
+    if not draft:
+        console.print(f"[red]✗ 草稿不存在: {draft_id}[/red]")
+        sys.exit(1)
+
+    content = (
+        f"[bold]草稿 ID:[/bold] {draft.id}\n"
+        f"[bold]名称:[/bold] {draft.name}\n"
+        f"[bold]描述:[/bold] {draft.description or '(无)'}\n"
+        f"[bold]创建时间:[/bold] {draft.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"[bold]来源信息:[/bold]\n"
+        f"  批次 ID: {draft.source.batch_id}\n"
+        f"  批次名称: {draft.source.batch_name}\n"
+        f"  批次创建时间: {draft.source.batch_created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"  点位数量: {draft.source.points_count}\n"
+        f"  照片数量: {draft.source.photos_count}\n\n"
+        f"[bold]规则信息:[/bold]\n"
+        f"  规则版本: v{draft.config_version}\n"
+        f"  重复策略: {draft.duplicate_strategy.value}\n"
+        f"  归档动作: {draft.archive_action.value}\n"
+        f"  命名模板: {draft.naming_template}\n\n"
+        f"[bold]内容摘要:[/bold]\n"
+        f"  预览项数: {len(draft.previews)}\n"
+        f"  冲突总数: {draft.conflict_summary.total}\n"
+        f"  未解决冲突: {draft.conflict_summary.unresolved}\n"
+    )
+
+    if draft.conflict_summary.by_reason:
+        content += "\n[bold]冲突分布:[/bold]\n"
+        for reason, count in draft.conflict_summary.by_reason.items():
+            content += f"  {reason}: {count} 项\n"
+
+    console.print(Panel.fit(content, title=f"草稿详情: {draft.name}"))
+
+    if draft.previews:
+        preview_table = Table(title="预览项（前10项）")
+        preview_table.add_column("#", justify="right")
+        preview_table.add_column("点位")
+        preview_table.add_column("源文件")
+        preview_table.add_column("目标路径")
+        preview_table.add_column("状态")
+
+        for i, preview in enumerate(draft.previews[:10], 1):
+            point_name = preview.point.name if preview.point else "未匹配"
+            status_style = "red" if preview.will_conflict else "green"
+            status = Text("冲突" if preview.will_conflict else "正常", style=status_style)
+            if preview.duplicate_strategy == DuplicateStrategy.RENAME and preview.will_conflict:
+                status = Text("自动重命名", style="yellow")
+            elif preview.duplicate_strategy == DuplicateStrategy.SKIP and preview.will_conflict:
+                status = Text("跳过", style="yellow")
+            elif preview.duplicate_strategy == DuplicateStrategy.OVERWRITE and preview.will_conflict:
+                status = Text("覆盖", style="magenta")
+            preview_table.add_row(
+                str(i),
+                point_name,
+                preview.photo.file_name,
+                preview.target_path.name,
+                status,
+            )
+
+        if len(draft.previews) > 10:
+            preview_table.add_row("...", f"还有 {len(draft.previews) - 10} 项", "", "", "")
+
+        console.print(preview_table)
+
+
+@draft.command("restore")
+@click.argument("draft_id")
+@click.option("--force", is_flag=True, help="强制恢复，跳过确认")
+@click.pass_context
+def draft_restore(ctx, draft_id: str, force: bool):
+    """恢复草稿到当前批次"""
+    batch = get_or_create_batch(ctx, require_existing=True)
+    store = ctx.obj["store"]
+    workspace = get_workspace(ctx)
+    config_mgr = ConfigManager(workspace)
+    config = config_mgr.load()
+
+    draft = store.load_draft(draft_id)
+    if not draft:
+        console.print(f"[red]✗ 草稿不存在: {draft_id}[/red]")
+        sys.exit(1)
+
+    compat = store.check_draft_restore_compatibility(draft, batch, config)
+
+    if compat.warnings:
+        console.print("[yellow]⚠ 检测到以下差异：[/yellow]")
+        for warning in compat.warnings:
+            console.print(f"  [yellow]•[/yellow] {warning}")
+        console.print()
+
+        if not force:
+            confirm = click.confirm(compat.confirmation_prompt, default=False)
+            if not confirm:
+                console.print("[yellow]已取消恢复[/yellow]")
+                sys.exit(0)
+
+    store.restore_draft(draft, batch)
+
+    console.print(f"[green]✓ 草稿已恢复到当前批次[/green]")
+    console.print(f"  草稿: {draft.name}")
+    console.print(f"  恢复预览项: {len(draft.previews)}")
+    console.print(f"  恢复冲突: {draft.conflict_summary.total} (未解决 {draft.conflict_summary.unresolved})")
+    console.print()
+    console.print("[cyan]提示：可以运行 'archive --dry-run' 验证恢复后的归档方案[/cyan]")
+
+
+@draft.command("delete")
+@click.argument("draft_id")
+@click.option("--force", is_flag=True, help="强制删除，跳过确认")
+@click.pass_context
+def draft_delete(ctx, draft_id: str, force: bool):
+    """删除指定草稿"""
+    workspace = get_workspace(ctx)
+    store = BatchStore(workspace)
+
+    draft = store.load_draft(draft_id)
+    if not draft:
+        console.print(f"[red]✗ 草稿不存在: {draft_id}[/red]")
+        sys.exit(1)
+
+    if not force:
+        confirm = click.confirm(f"确定要删除草稿 '{draft.name}' 吗？此操作不可撤销。", default=False)
+        if not confirm:
+            console.print("[yellow]已取消删除[/yellow]")
+            sys.exit(0)
+
+    success = store.delete_draft(draft_id)
+    if success:
+        console.print(f"[green]✓ 草稿已删除: {draft.name}[/green]")
+    else:
+        console.print(f"[red]✗ 删除草稿失败: {draft_id}[/red]")
+        sys.exit(1)
 
 
 @cli.command("info")

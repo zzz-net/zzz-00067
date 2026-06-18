@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import datetime
@@ -10,8 +11,14 @@ from .models import (
     Annotation,
     AnnotationStatus,
     ArchiverConfig,
+    ArchiveAction,
+    ArchiveDraft,
     Batch,
     Conflict,
+    ConflictSummary,
+    DraftRestoreResult,
+    DraftSourceInfo,
+    DuplicateStrategy,
     NoteEntry,
     OperationLogEntry,
     Photo,
@@ -27,6 +34,7 @@ class BatchStore:
         self.workspace = Path(workspace).resolve()
         self.data_dir = self.workspace / ".patrol-archiver"
         self.batches_dir = self.data_dir / "batches"
+        self.drafts_dir = self.data_dir / "drafts"
         self.current_batch_file = self.data_dir / "current_batch.json"
         self.operation_log_file = self.data_dir / "operation_log.jsonl"
         self._current_batch: Optional[Batch] = None
@@ -34,6 +42,7 @@ class BatchStore:
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.batches_dir.mkdir(parents=True, exist_ok=True)
+        self.drafts_dir.mkdir(parents=True, exist_ok=True)
 
     def create_batch(self, name: Optional[str] = None, config_version: int = 1) -> Batch:
         self.ensure_dirs()
@@ -339,3 +348,190 @@ class BatchStore:
                     continue
 
         return logs
+
+    def _compute_points_hash(self, points: Dict[str, Point]) -> str:
+        data = json.dumps({pid: p.model_dump(mode="json") for pid, p in sorted(points.items())}, sort_keys=True)
+        return hashlib.sha256(data.encode("utf-8")).hexdigest()[:16]
+
+    def _compute_photos_hash(self, photos: Dict[str, Photo]) -> str:
+        data = json.dumps({pid: p.model_dump(mode="json") for pid, p in sorted(photos.items())}, sort_keys=True)
+        return hashlib.sha256(data.encode("utf-8")).hexdigest()[:16]
+
+    def _compute_conflict_summary(self, conflicts: List[Conflict]) -> ConflictSummary:
+        by_reason: Dict[str, int] = {}
+        for c in conflicts:
+            by_reason[c.reason] = by_reason.get(c.reason, 0) + 1
+        return ConflictSummary(
+            total=len(conflicts),
+            unresolved=sum(1 for c in conflicts if not c.resolved),
+            by_reason=by_reason,
+        )
+
+    def save_draft(
+        self,
+        batch: Batch,
+        name: str,
+        description: str = "",
+        config: Optional[ArchiverConfig] = None,
+    ) -> ArchiveDraft:
+        if not batch.previews:
+            raise ValueError("当前批次没有预览数据，请先运行 preview 命令")
+
+        self.ensure_dirs()
+
+        draft_id = f"draft_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+
+        source_info = DraftSourceInfo(
+            batch_id=batch.id,
+            batch_name=batch.name,
+            batch_created_at=batch.created_at,
+            points_count=len(batch.points),
+            photos_count=len(batch.photos),
+            points_hash=self._compute_points_hash(batch.points),
+            photos_hash=self._compute_photos_hash(batch.photos),
+        )
+
+        conflict_summary = self._compute_conflict_summary(batch.conflicts)
+
+        draft = ArchiveDraft(
+            id=draft_id,
+            name=name,
+            description=description,
+            source=source_info,
+            config_version=batch.config_version,
+            duplicate_strategy=config.duplicate_strategy if config else DuplicateStrategy.BLOCK,
+            archive_action=config.archive_action if config else ArchiveAction.COPY,
+            previews=list(batch.previews),
+            conflicts=list(batch.conflicts),
+            conflict_summary=conflict_summary,
+            naming_template=config.naming_template if config else "",
+            allowed_extensions=list(config.allowed_extensions) if config else [],
+        )
+
+        draft_file = self.drafts_dir / f"{draft_id}.json"
+        with open(draft_file, "w", encoding="utf-8") as f:
+            json.dump(draft.model_dump(mode="json"), f, indent=2, ensure_ascii=False)
+
+        return draft
+
+    def list_drafts(self) -> List[Dict[str, Any]]:
+        if not self.drafts_dir.exists():
+            return []
+
+        drafts = []
+        for draft_file in sorted(self.drafts_dir.glob("draft_*.json"), reverse=True):
+            try:
+                with open(draft_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                drafts.append({
+                    "id": data["id"],
+                    "name": data["name"],
+                    "created_at": data["created_at"],
+                    "description": data.get("description", ""),
+                    "source_batch_name": data["source"]["batch_name"],
+                    "config_version": data["config_version"],
+                    "previews_count": len(data.get("previews", [])),
+                    "conflicts_total": data.get("conflict_summary", {}).get("total", 0),
+                    "conflicts_unresolved": data.get("conflict_summary", {}).get("unresolved", 0),
+                })
+            except Exception:
+                continue
+        return drafts
+
+    def load_draft(self, draft_id: str) -> Optional[ArchiveDraft]:
+        if not self.drafts_dir.exists():
+            return None
+
+        draft_file = self.drafts_dir / f"{draft_id}.json"
+        if not draft_file.exists():
+            for f in self.drafts_dir.glob("draft_*.json"):
+                try:
+                    with open(f, "r", encoding="utf-8") as fp:
+                        data = json.load(fp)
+                    if data.get("name") == draft_id:
+                        return ArchiveDraft.model_validate(data)
+                except Exception:
+                    continue
+            return None
+
+        with open(draft_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return ArchiveDraft.model_validate(data)
+
+    def delete_draft(self, draft_id: str) -> bool:
+        if not self.drafts_dir.exists():
+            return False
+
+        draft_file = self.drafts_dir / f"{draft_id}.json"
+        if draft_file.exists():
+            draft_file.unlink()
+            return True
+
+        for f in self.drafts_dir.glob("draft_*.json"):
+            try:
+                with open(f, "r", encoding="utf-8") as fp:
+                    data = json.load(fp)
+                if data.get("name") == draft_id:
+                    f.unlink()
+                    return True
+            except Exception:
+                continue
+
+        return False
+
+    def check_draft_restore_compatibility(
+        self,
+        draft: ArchiveDraft,
+        current_batch: Batch,
+        current_config: ArchiverConfig,
+    ) -> DraftRestoreResult:
+        result = DraftRestoreResult(success=True)
+
+        if current_config.version != draft.config_version:
+            result.warnings.append(
+                f"规则版本不匹配：草稿基于 v{draft.config_version}，当前为 v{current_config.version}"
+            )
+            result.needs_confirmation = True
+
+        current_points_hash = self._compute_points_hash(current_batch.points)
+        if draft.source.points_hash != current_points_hash:
+            result.warnings.append(
+                f"点位内容已变化：草稿时点位 {draft.source.points_count} 个，当前 {len(current_batch.points)} 个"
+            )
+            result.needs_confirmation = True
+
+        current_photos_hash = self._compute_photos_hash(current_batch.photos)
+        if draft.source.photos_hash != current_photos_hash:
+            result.warnings.append(
+                f"照片扫描结果已变化：草稿时照片 {draft.source.photos_count} 张，当前 {len(current_batch.photos)} 张"
+            )
+            result.needs_confirmation = True
+
+        if draft.duplicate_strategy != current_config.duplicate_strategy:
+            result.warnings.append(
+                f"重复策略不匹配：草稿为 {draft.duplicate_strategy.value}，当前为 {current_config.duplicate_strategy.value}"
+            )
+
+        if draft.archive_action != current_config.archive_action:
+            result.warnings.append(
+                f"归档动作不匹配：草稿为 {draft.archive_action.value}，当前为 {current_config.archive_action.value}"
+            )
+
+        if result.warnings:
+            result.confirmation_prompt = (
+                "检测到草稿与当前状态存在差异，恢复后将覆盖当前批次的预览和冲突数据。"
+                "是否继续？"
+            )
+
+        return result
+
+    def restore_draft(
+        self,
+        draft: ArchiveDraft,
+        current_batch: Batch,
+    ) -> Batch:
+        current_batch.previews = list(draft.previews)
+        current_batch.conflicts = list(draft.conflicts)
+        current_batch.config_version = draft.config_version
+        self._save_batch(current_batch)
+        return current_batch

@@ -279,3 +279,57 @@ class InvalidNamingTemplateError(ValueError):
         self.errors = list(errors)
         msg_lines = ["命名模板不合法："] + [f"  • {e}" for e in self.errors]
         super().__init__("\n".join(msg_lines))
+
+
+class ConflictSummary(BaseModel):
+    total: int = 0
+    unresolved: int = 0
+    by_reason: Dict[str, int] = Field(default_factory=dict)
+
+
+class DraftSourceInfo(BaseModel):
+    batch_id: str
+    batch_name: str
+    batch_created_at: datetime
+    points_count: int
+    photos_count: int
+    points_hash: str
+    photos_hash: str
+
+    @field_validator("batch_created_at", mode="before")
+    @classmethod
+    def _convert_datetime(cls, v):
+        if isinstance(v, str):
+            return datetime.fromisoformat(v)
+        return v
+
+
+class ArchiveDraft(BaseModel):
+    id: str
+    name: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    description: str = ""
+    source: DraftSourceInfo
+    config_version: int
+    duplicate_strategy: DuplicateStrategy
+    archive_action: ArchiveAction
+    previews: List[PreviewItem] = Field(default_factory=list)
+    conflicts: List[Conflict] = Field(default_factory=list)
+    conflict_summary: ConflictSummary = Field(default_factory=ConflictSummary)
+    naming_template: str = ""
+    allowed_extensions: List[str] = Field(default_factory=list)
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def _convert_created_at(cls, v):
+        if isinstance(v, str):
+            return datetime.fromisoformat(v)
+        return v
+
+
+class DraftRestoreResult(BaseModel):
+    success: bool = False
+    warnings: List[str] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+    needs_confirmation: bool = False
+    confirmation_prompt: str = ""
