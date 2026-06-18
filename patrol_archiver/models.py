@@ -102,6 +102,7 @@ class PreviewItem(BaseModel):
     target_path: Path
     will_conflict: bool = False
     duplicate_strategy: DuplicateStrategy = DuplicateStrategy.BLOCK
+    archive_action: ArchiveAction = ArchiveAction.COPY
     annotation: Optional[Annotation] = None
 
     @field_validator("target_path", mode="before")

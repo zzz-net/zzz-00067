@@ -111,7 +111,8 @@ class Archiver:
                 target_path = preview.target_path
                 target_path.parent.mkdir(parents=True, exist_ok=True)
 
-                if self.config.archive_action == ArchiveAction.MOVE:
+                action = getattr(preview, "archive_action", self.config.archive_action)
+                if action == ArchiveAction.MOVE:
                     shutil.move(str(preview.photo.source_path), str(target_path))
                 else:
                     shutil.copy2(str(preview.photo.source_path), str(target_path))

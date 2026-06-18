@@ -1019,6 +1019,15 @@ def execute_archive(ctx, confirm: bool, dry_run: bool):
 
     archiver = Archiver(workspace, config, store)
 
+    preview_actions = set()
+    for p in batch.previews:
+        preview_actions.add(getattr(p, "archive_action", config.archive_action).value)
+    action_display = ", ".join(sorted(preview_actions)) if preview_actions else config.archive_action.value
+
+    console.print(f"[cyan]当前归档动作:[/cyan] {action_display}")
+    if action_display != config.archive_action.value:
+        console.print(f"[yellow]⚠ 预览中保存的动作与当前配置不一致，将沿用预览中的动作[/yellow]")
+
     is_valid, errors = archiver.validate_previews(batch)
     if not is_valid:
         console.print("[red]✗ 归档验证失败：[/red]")
@@ -1373,6 +1382,19 @@ def draft_restore(ctx, draft_id: str, force: bool):
     console.print(f"  草稿: {draft.name}")
     console.print(f"  恢复预览项: {len(draft.previews)}")
     console.print(f"  恢复冲突: {draft.conflict_summary.total} (未解决 {draft.conflict_summary.unresolved})")
+    console.print(f"  [cyan]归档动作:[/cyan] {draft.archive_action.value}")
+    console.print(f"  [cyan]重复策略:[/cyan] {draft.duplicate_strategy.value}")
+
+    if draft.archive_action != config.archive_action or draft.duplicate_strategy != config.duplicate_strategy:
+        console.print()
+        console.print("[yellow]⚠ 注意：草稿中保存的规则与当前配置不一致[/yellow]")
+        if draft.archive_action != config.archive_action:
+            console.print(f"  [yellow]•[/yellow] 归档动作: 草稿为 {draft.archive_action.value}，当前配置为 {config.archive_action.value}")
+            console.print(f"    [yellow]→[/yellow] 将沿用草稿中的 {draft.archive_action.value} 动作执行归档")
+        if draft.duplicate_strategy != config.duplicate_strategy:
+            console.print(f"  [yellow]•[/yellow] 重复策略: 草稿为 {draft.duplicate_strategy.value}，当前配置为 {config.duplicate_strategy.value}")
+            console.print(f"    [yellow]→[/yellow] 将沿用草稿中的 {draft.duplicate_strategy.value} 策略处理冲突")
+
     console.print()
     console.print("[cyan]提示：可以运行 'archive --dry-run' 验证恢复后的归档方案[/cyan]")
 

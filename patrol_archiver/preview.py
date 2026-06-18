@@ -79,6 +79,7 @@ class PreviewGenerator:
                             target_path=target_path,
                             will_conflict=True,
                             duplicate_strategy=DuplicateStrategy.BLOCK,
+                            archive_action=self.config.archive_action,
                         ))
                     elif self.config.duplicate_strategy == DuplicateStrategy.RENAME:
                         suffix = photo.source_path.suffix
@@ -92,6 +93,7 @@ class PreviewGenerator:
                             target_path=renamed_path,
                             will_conflict=False,
                             duplicate_strategy=DuplicateStrategy.RENAME,
+                            archive_action=self.config.archive_action,
                         ))
                     elif self.config.duplicate_strategy == DuplicateStrategy.SKIP:
                         if i == 0:
@@ -102,7 +104,8 @@ class PreviewGenerator:
                                 target_path=target_path,
                                 will_conflict=False,
                                 duplicate_strategy=DuplicateStrategy.SKIP,
-                            ))
+                            archive_action=self.config.archive_action,
+                        ))
                         else:
                             conflicts.append(Conflict(
                                 id=f"conflict_{uuid.uuid4().hex[:8]}",
@@ -121,6 +124,7 @@ class PreviewGenerator:
                             target_path=target_path,
                             will_conflict=True,
                             duplicate_strategy=DuplicateStrategy.OVERWRITE,
+                            archive_action=self.config.archive_action,
                         ))
             else:
                 photo = photo_list[0]
@@ -144,6 +148,7 @@ class PreviewGenerator:
                             target_path=target_path,
                             will_conflict=False,
                             duplicate_strategy=self.config.duplicate_strategy,
+                            archive_action=self.config.archive_action,
                         ))
                     elif self.config.duplicate_strategy == DuplicateStrategy.BLOCK:
                         conflicts.append(Conflict(
@@ -160,6 +165,7 @@ class PreviewGenerator:
                             target_path=target_path,
                             will_conflict=True,
                             duplicate_strategy=DuplicateStrategy.BLOCK,
+                            archive_action=self.config.archive_action,
                         ))
                     elif self.config.duplicate_strategy == DuplicateStrategy.RENAME:
                         suffix = photo.source_path.suffix
@@ -178,6 +184,7 @@ class PreviewGenerator:
                             target_path=renamed_path,
                             will_conflict=False,
                             duplicate_strategy=DuplicateStrategy.RENAME,
+                            archive_action=self.config.archive_action,
                         ))
                     elif self.config.duplicate_strategy == DuplicateStrategy.SKIP:
                         conflicts.append(Conflict(
@@ -197,6 +204,7 @@ class PreviewGenerator:
                             target_path=target_path,
                             will_conflict=True,
                             duplicate_strategy=DuplicateStrategy.OVERWRITE,
+                            archive_action=self.config.archive_action,
                         ))
                 elif target_path.exists():
                     existing_photo = self._try_load_existing_photo(target_path)
@@ -216,6 +224,7 @@ class PreviewGenerator:
                             target_path=target_path,
                             will_conflict=False,
                             duplicate_strategy=self.config.duplicate_strategy,
+                            archive_action=self.config.archive_action,
                         ))
                     elif self.config.duplicate_strategy == DuplicateStrategy.BLOCK:
                         conflicts.append(Conflict(
@@ -232,6 +241,7 @@ class PreviewGenerator:
                             target_path=target_path,
                             will_conflict=True,
                             duplicate_strategy=DuplicateStrategy.BLOCK,
+                            archive_action=self.config.archive_action,
                         ))
                     elif self.config.duplicate_strategy == DuplicateStrategy.RENAME:
                         suffix = photo.source_path.suffix
@@ -250,6 +260,7 @@ class PreviewGenerator:
                             target_path=renamed_path,
                             will_conflict=False,
                             duplicate_strategy=DuplicateStrategy.RENAME,
+                            archive_action=self.config.archive_action,
                         ))
                     elif self.config.duplicate_strategy == DuplicateStrategy.SKIP:
                         conflicts.append(Conflict(
@@ -269,6 +280,7 @@ class PreviewGenerator:
                             target_path=target_path,
                             will_conflict=True,
                             duplicate_strategy=DuplicateStrategy.OVERWRITE,
+                            archive_action=self.config.archive_action,
                         ))
                 else:
                     target_paths[target_path] = photo
@@ -278,6 +290,7 @@ class PreviewGenerator:
                         target_path=target_path,
                         will_conflict=False,
                         duplicate_strategy=self.config.duplicate_strategy,
+                        archive_action=self.config.archive_action,
                     ))
 
         return previews, conflicts

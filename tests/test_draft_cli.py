@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -10,6 +11,10 @@ from click.testing import CliRunner
 
 from patrol_archiver.cli import cli
 from patrol_archiver.store import BatchStore
+
+
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 class TestDraftCliEndToEnd:
@@ -27,6 +32,7 @@ class TestDraftCliEndToEnd:
     def _run(self, args: List[str], input_text: str = ""):
         cmd_args = ["--workspace", str(self.workspace)] + args
         result = self.runner.invoke(cli, cmd_args, input=input_text)
+        result.clean_output = _strip_ansi(result.output)
         return result
 
     def _setup_sample_data(self):
@@ -349,3 +355,161 @@ class TestDraftCliEndToEnd:
         assert result.exit_code == 0
         for i in range(5):
             assert f"草稿{i}" in result.output
+
+    def test_draft_save_copy_then_change_to_move_restore_confirm_stays_copy(self):
+        """save copy 草稿 -> 改成 move -> restore -> confirm 仍为 copy（源文件不被移动）"""
+        self._setup_sample_data()
+
+        self._run(["rules", "set-action", "copy"])
+        self._run(["preview"])
+        self._run(["draft", "save", "copy草稿"])
+
+        store = BatchStore(self.workspace)
+        batch = store.get_current_batch()
+        source_paths_before = [p.photo.source_path for p in batch.previews]
+        for sp in source_paths_before:
+            assert Path(sp).exists(), f"归档前源文件应存在: {sp}"
+
+        self._run(["rules", "set-action", "move"])
+
+        result = self._run(["draft", "restore", "copy草稿", "--force"])
+        assert result.exit_code == 0
+        assert "copy" in result.clean_output.lower()
+        assert "沿用草稿中的 copy" in result.clean_output or "归档动作: copy" in result.clean_output
+
+        result = self._run(["archive", "--dry-run"])
+        assert result.exit_code == 0
+        assert "当前归档动作: copy" in result.clean_output
+        assert "预览中保存的动作与当前配置不一致" in result.clean_output
+
+        result = self._run(["archive", "--confirm"])
+        assert result.exit_code == 0
+        assert "当前归档动作: copy" in result.clean_output
+
+        for sp in source_paths_before:
+            assert Path(sp).exists(), f"copy 动作归档后源文件应仍然存在，但被移动了: {sp}"
+
+    def test_draft_save_move_then_change_to_copy_restore_confirm_stays_move(self):
+        """save move 草稿 -> 改成 copy -> restore -> confirm 仍为 move（源文件被移动）"""
+        import shutil
+
+        alt_photos_dir = self.tmp / "move_test_photos"
+        alt_photos_dir.mkdir()
+        for f in (self.sample / "photos").glob("*.jpg"):
+            shutil.copy2(f, alt_photos_dir / f.name)
+
+        self._run([
+            "import", "--csv", str(self.sample / "points.csv"),
+            "--batch-name", "move测试批次"
+        ])
+        self._run(["scan", "--dir", str(alt_photos_dir)])
+
+        self._run(["rules", "set-action", "move"])
+        self._run(["preview"])
+        self._run(["draft", "save", "move草稿"])
+
+        store = BatchStore(self.workspace)
+        batch = store.get_current_batch()
+        source_paths_before = [Path(p.photo.source_path) for p in batch.previews]
+        for sp in source_paths_before:
+            assert sp.exists(), f"归档前源文件应存在: {sp}"
+
+        self._run(["rules", "set-action", "copy"])
+
+        result = self._run(["draft", "restore", "move草稿", "--force"])
+        assert result.exit_code == 0
+        assert "move" in result.clean_output.lower()
+
+        result = self._run(["archive", "--confirm"])
+        assert result.exit_code == 0
+        assert "当前归档动作: move" in result.clean_output
+
+        for sp in source_paths_before:
+            assert not sp.exists(), f"move 动作归档后源文件应被移动，但仍然存在: {sp}"
+
+    def test_draft_persist_then_restore_dry_run_uses_draft_action(self):
+        """跨重启后恢复草稿再 dry-run 沿用草稿动作"""
+        self._setup_sample_data()
+
+        self._run(["rules", "set-action", "copy"])
+        self._run(["preview"])
+        self._run(["draft", "save", "持久化copy草稿"])
+
+        drafts_dir = self.workspace / ".patrol-archiver" / "drafts"
+        draft_files = list(drafts_dir.glob("draft_*.json"))
+        assert len(draft_files) == 1
+
+        with open(draft_files[0], "r", encoding="utf-8") as f:
+            draft_data = json.load(f)
+        assert draft_data["archive_action"] == "copy"
+        for preview in draft_data["previews"]:
+            assert preview["archive_action"] == "copy"
+
+        self._run(["rules", "set-action", "move"])
+
+        new_store = BatchStore(self.workspace)
+        new_store._current_batch = None
+        loaded_draft = new_store.load_draft(draft_data["id"])
+        assert loaded_draft is not None
+        assert loaded_draft.archive_action.value == "copy"
+
+        result = self._run(["draft", "restore", "持久化copy草稿", "--force"])
+        assert result.exit_code == 0
+        assert "归档动作: copy" in result.clean_output
+
+        result = self._run(["archive", "--dry-run"])
+        assert result.exit_code == 0
+        assert "当前归档动作: copy" in result.clean_output
+        assert "预览中保存的动作与当前配置不一致" in result.clean_output
+
+    def test_draft_persist_then_restore_confirm_uses_draft_action(self):
+        """跨重启后恢复草稿再 confirm 沿用草稿动作"""
+        self._setup_sample_data()
+
+        self._run(["rules", "set-action", "copy"])
+        self._run(["preview"])
+        self._run(["draft", "save", "重启后确认草稿"])
+
+        store = BatchStore(self.workspace)
+        batch = store.get_current_batch()
+        source_paths_before = [Path(p.photo.source_path) for p in batch.previews]
+
+        drafts_dir = self.workspace / ".patrol-archiver" / "drafts"
+        draft_files = list(drafts_dir.glob("draft_*.json"))
+        assert len(draft_files) == 1
+        draft_id = draft_files[0].stem
+
+        self._run(["rules", "set-action", "move"])
+
+        store2 = BatchStore(self.workspace)
+        store2._current_batch = None
+
+        result = self._run(["draft", "restore", draft_id, "--force"])
+        assert result.exit_code == 0
+
+        result = self._run(["archive", "--confirm"])
+        assert result.exit_code == 0
+        assert "当前归档动作: copy" in result.clean_output
+
+        for sp in source_paths_before:
+            assert sp.exists(), f"copy 草稿归档后源文件应仍然存在，但被移动了: {sp}"
+
+    def test_draft_restore_output_shows_action_discrepancy(self):
+        """恢复草稿时如果动作与当前配置不一致，明确提示用户"""
+        self._setup_sample_data()
+
+        self._run(["rules", "set-action", "copy"])
+        self._run(["rules", "set-duplicate", "block"])
+        self._run(["preview"])
+        self._run(["draft", "save", "差异提示草稿"])
+
+        self._run(["rules", "set-action", "move"])
+        self._run(["rules", "set-duplicate", "rename"])
+
+        result = self._run(["draft", "restore", "差异提示草稿", "--force"])
+        assert result.exit_code == 0
+        assert "草稿中保存的规则与当前配置不一致" in result.clean_output
+        assert "归档动作: 草稿为 copy" in result.clean_output
+        assert "将沿用草稿中的 copy" in result.clean_output
+        assert "重复策略: 草稿为 block" in result.clean_output
+        assert "将沿用草稿中的 block" in result.clean_output
