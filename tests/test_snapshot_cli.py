@@ -633,3 +633,87 @@ class TestSnapshotCliEndToEnd:
         ]
         assert previews >= 9
         assert len(template_errors) == 0, f"存在模板渲染失败: {template_errors[:3]}"
+
+    def test_nested_illegal_photo_attr_blocked_at_set_template_cli(self):
+        """非法嵌套 photo 属性在 set-template 时被拦截，不落库。"""
+        version_before = self._read_config_version(self.workspace_a)
+        result = self._run(
+            ["rules", "set-template", "{point.id}_{photo.source_path.nonexist}"],
+            self.workspace_a,
+        )
+        assert result.exit_code != 0
+        assert "命名模板更新失败" in result.output
+        assert "photo.source_path.nonexist" in result.output
+        assert self._read_config_version(self.workspace_a) == version_before
+
+    def test_nested_illegal_point_attr_blocked_at_set_template_cli(self):
+        """非法嵌套 point 属性在 set-template 时被拦截。"""
+        result = self._run(
+            ["rules", "set-template", "{point.id.bogus}_{photo.source_path.suffix}"],
+            self.workspace_a,
+        )
+        assert result.exit_code != 0
+        assert "point.id.bogus" in result.output
+
+    def test_nested_illegal_photo_attr_in_snapshot_import_blocked_cli(self):
+        """含非法嵌套 photo 属性的快照导入被拦截，配置不变。"""
+        self._run(["rules", "show"], self.workspace_b)
+        cfg_before = self._read_config_version(self.workspace_b)
+        tpl_before = self._read_naming_template(self.workspace_b)
+        snap_data = {
+            "snapshot_id": "snap_nested_bad",
+            "name": "非法嵌套快照",
+            "description": "",
+            "config_version": 1,
+            "created_by": "tester",
+            "created_at": "2026-06-19T00:00:00",
+            "naming_template": "{point.id}_{photo.source_path.NOPE}",
+            "allowed_extensions": [".jpg"],
+            "duplicate_strategy": "skip",
+            "archive_action": "copy",
+            "archive_dir": "archive",
+            "photo_dir": "photos",
+            "notes_json": "notes.json",
+            "points_csv": "points.csv",
+            "default_author": "tester",
+        }
+        with open(self.snapshot_file, "w", encoding="utf-8") as f:
+            json.dump(snap_data, f, ensure_ascii=False)
+        result = self._run(
+            ["snapshot", "import", "-f", str(self.snapshot_file), "--force"],
+            self.workspace_b,
+        )
+        assert result.exit_code != 0
+        assert "快照导入失败" in result.output
+        assert "photo.source_path.NOPE" in result.output
+        assert self._read_config_version(self.workspace_b) == cfg_before
+        assert self._read_naming_template(self.workspace_b) == tpl_before
+
+    def test_legal_nested_attrs_set_and_preview_ok_cli(self):
+        """合法嵌套属性 source_path.suffix/stem/name 正常设置并可预览。"""
+        for tpl in [
+            "{point.id}_{photo.source_path.suffix}",
+            "{point.id}_{photo.source_path.stem}",
+            "{point.id}_{photo.source_path.name}",
+        ]:
+            result = self._run(["rules", "set-template", tpl], self.workspace_a)
+            assert result.exit_code == 0, f"合法模板 {tpl} 应被接受"
+
+    def test_source_path_suffix_full_chain_ok_cli(self):
+        """{photo.source_path.suffix} 走完 export→import→preview 全链路。"""
+        tpl = "{point.category}/{point.id}_{photo.source_path.suffix}"
+        self._run(["rules", "set-template", tpl], self.workspace_a)
+        self._run(
+            ["snapshot", "export", "-o", str(self.snapshot_file), "--name", "嵌套链路"],
+            self.workspace_a,
+        )
+        result = self._run(
+            ["snapshot", "import", "-f", str(self.snapshot_file), "--force"],
+            self.workspace_b,
+        )
+        assert result.exit_code == 0
+        self._setup_sample_data(self.workspace_b)
+        preview = self._run(["preview"], self.workspace_b)
+        assert preview.exit_code == 0
+        previews, _ = self._batch_metrics(self.workspace_b)
+        assert previews >= 9

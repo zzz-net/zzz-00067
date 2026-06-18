@@ -1,0 +1,19 @@
+{
+  "default_author": "reviewer",
+  "allowed_extensions": [
+    ".jpg"
+  ],
+  "naming_template": "{point.id}_{photo.source_path.NOPE}",
+  "archive_action": "copy",
+  "photo_dir": "photos",
+  "created_by": "reviewer",
+  "notes_json": "notes.json",
+  "config_version": 1,
+  "snapshot_id": "snap_review_bad_nested",
+  "created_at": "2026-06-19T00:00:00",
+  "points_csv": "points.csv",
+  "duplicate_strategy": "skip",
+  "description": "",
+  "archive_dir": "archive",
+  "name": "review坏嵌套快照"
+}
