@@ -184,6 +184,159 @@ patrol batch switch <batch_id>
 patrol batch show
 ```
 
+### 11. 规则快照管理
+```bash
+# 导出当前规则为快照文件
+patrol snapshot export -o rules_snapshot.json
+
+# 查看快照文件内容
+patrol snapshot show -f rules_snapshot.json
+
+# 导入规则快照（有冲突时会提示确认）
+patrol snapshot import -f rules_snapshot.json
+
+# 强制导入（跳过确认，适合自动化脚本）
+patrol snapshot import -f rules_snapshot.json --force
+
+# 查看导入历史日志
+patrol snapshot log
+
+# 查看最近一次导入的快照信息
+patrol snapshot show
+```
+
+## 规则快照完整流程
+
+### 场景说明
+规则快照用于跨工作区迁移完整规则集，包括：命名模板、允许扩展名、重复策略、归档方式、目录配置等。导入前会检测冲突，要求显式确认后才会应用。
+
+### 1. 导出规则快照
+```bash
+# 先按需要调整规则
+patrol rules set-duplicate rename
+patrol rules add-ext .heic
+patrol rules set-template "{point.category}/{point.id}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"
+
+# 导出快照
+patrol snapshot export -o ./snapshots/prod_rules.json \
+    --name "生产环境规则" \
+    --description "2026年6月生产环境归档规则" \
+    --author "张三"
+```
+
+**预期输出：**
+```
+✓ 规则快照已导出
+  快照ID: snapshot_20260619_xxxxxx_xxxxxxxx
+  快照名称: 生产环境规则
+  配置版本: v3
+  导出人: 张三
+  导出时间: 2026-06-19 xx:xx:xx
+  文件路径: ./snapshots/prod_rules.json
+```
+
+### 2. 查看快照文件内容
+```bash
+patrol snapshot show -f ./snapshots/prod_rules.json
+```
+
+**预期输出：** 显示快照ID、名称、描述、配置版本、创建人、创建时间、命名模板、扩展名列表、重复策略、归档方式、各目录路径。
+
+### 3. 导入规则快照
+在另一个工作区或新环境中导入：
+
+```bash
+cd /path/to/new/workspace
+patrol snapshot import -f ./snapshots/prod_rules.json
+```
+
+**导入时会自动检测以下冲突：**
+
+| 冲突类型 | 说明 |
+|---------|------|
+| 配置存在 | 当前工作区已有配置（v1以上版本） |
+| 版本差异 | 当前配置版本高于快照版本 |
+| 命名模板 | 模板内容不同 |
+| 策略差异 | 重复处理策略/归档方式不同 |
+| 扩展名 | 允许的扩展名集合不同 |
+| 批次存在 | 当前工作区已有批次（导入后这些批次仍保留，规则更新） |
+
+**冲突确认界面会显示对比表格，并询问"是否继续？"
+
+### 4. 确认导入
+输入 `y` 或 `yes` 继续，导入成功：
+
+**成功输出：**
+```
+✓ 快照导入成功
+  新配置版本: v2
+  已同步批次: 3 个
+  操作已记录到日志
+```
+
+### 5. 取消导入
+输入 `n` 或 `no` 取消：
+
+**取消输出：**
+```
+已取消导入
+```
+取消后：
+- 配置不会修改
+- 所有批次保持原有版本
+- 操作日志**不会**记录
+
+### 6. 验证导入结果
+```bash
+# 方式1：查看规则及导入来源
+patrol rules show
+# 面板底部会显示"最近快照导入"区块，包含快照名称、版本、导入时间、导入人、来源文件
+
+# 方式2：查看系统信息
+patrol info
+# 同样会显示最近快照导入信息
+
+# 方式3：查看当前快照信息
+patrol snapshot show
+# 显示最近一次导入的快照详情
+
+# 方式4：查看导入历史
+patrol snapshot log -n 10
+# 表格形式展示最近N次导入，包含时间、操作人、快照名、版本变化、状态、冲突数
+
+# 方式5：直接导出报告验证版本
+patrol export markdown -o verify_report.md
+# 报告中的配置版本应为导入后的新版本
+
+# 方式6：切换旧批次后导出
+patrol batch switch <旧批次ID>
+patrol export csv -o old_batch.csv
+# 旧批次导出的报告也使用新配置版本
+```
+
+### 7. 跨工作区迁移完整示例
+```bash
+# === 工作区A：导出
+cd workspace_a
+patrol rules set-duplicate rename
+patrol rules add-ext .heic
+patrol rules set-template "custom/{point.id}_{photo.taken_at:%Y%m%d}{photo.source_path.suffix}"
+patrol snapshot export -o rules.json --name "标准规则集" --author "admin"
+
+# === 工作区B：导入
+cd ../workspace_b
+patrol batch new --name "旧批次1"
+patrol batch new --name "旧批次2"
+patrol snapshot import -f ../workspace_a/rules.json
+# 看到冲突列表后输入 y 确认
+
+# === 验证
+patrol rules show          # 显示新规则和导入来源
+patrol snapshot log        # 看到导入记录
+patrol batch switch 旧批次1
+patrol export markdown -o test.md  # 报告显示新版本
+```
+
 ## 完整可复现流程
 
 ```bash
@@ -375,6 +528,12 @@ Commands:
   export     导出报告
     markdown 导出 Markdown 报告
     csv      导出 CSV 报告
+
+  snapshot   规则快照管理
+    export   导出当前规则为快照文件
+    import   导入规则快照（冲突时需确认）
+    log      查看快照导入操作日志
+    show     查看当前快照信息或指定快照内容
 
   info       显示系统信息
 ```

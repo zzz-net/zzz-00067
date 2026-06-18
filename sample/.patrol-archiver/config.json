@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 6,
   "naming_template": "{point.category}/{point.id}_{point.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}",
   "allowed_extensions": [
     ".jpg",
@@ -8,13 +8,15 @@
     ".gif",
     ".bmp",
     ".tiff",
-    ".webp"
+    ".webp",
+    ".heic"
   ],
-  "duplicate_strategy": "block",
+  "duplicate_strategy": "rename",
   "archive_action": "move",
   "archive_dir": "archive",
   "photo_dir": "photos",
   "notes_json": "notes.json",
   "points_csv": "points.csv",
-  "default_author": "user"
+  "default_author": "user",
+  "last_snapshot": null
 }
