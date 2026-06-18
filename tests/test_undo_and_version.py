@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import os
 import shutil
@@ -8,6 +9,7 @@ from pathlib import Path
 
 from patrol_archiver.annotation import AnnotationManager
 from patrol_archiver.config import ConfigManager
+from patrol_archiver.exporter import ReportExporter
 from patrol_archiver.models import (
     Annotation,
     AnnotationStatus,
@@ -179,3 +181,92 @@ class TestConfigVersionPersists:
         mgr.load()
         config = mgr.add_extension(".jpg")
         assert config.version == 1
+
+
+class TestExportVersionConsistency:
+    def setup_method(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.store = BatchStore(self.tmp)
+        self.batch = self.store.create_batch(name="test_export_version")
+        self.store.add_points(self.batch, [
+            Point(id="P001", name="点位1", category="A"),
+            Point(id="P002", name="点位2", category="B"),
+        ])
+        self.exporter = ReportExporter(self.tmp)
+
+    def teardown_method(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_markdown_contains_config_version(self):
+        md_path = self.tmp / "report.md"
+        self.exporter.export_markdown(self.batch, md_path)
+        content = md_path.read_text(encoding="utf-8")
+        assert "**配置版本**: v1" in content
+
+    def test_csv_contains_config_version_column(self):
+        csv_path = self.tmp / "report.csv"
+        self.exporter.export_csv(self.batch, csv_path)
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert "config_version" in rows[0]
+        assert rows[0]["config_version"] == "v1"
+
+    def test_markdown_and_csv_same_version_after_rule_change(self):
+        mgr = ConfigManager(self.tmp)
+        mgr.load()
+        config = mgr.set_duplicate_strategy(DuplicateStrategy.RENAME)
+        self.store.update_config_version(self.batch, config.version)
+
+        md_path = self.tmp / "report.md"
+        csv_path = self.tmp / "report.csv"
+        self.exporter.export_markdown(self.batch, md_path)
+        self.exporter.export_csv(self.batch, csv_path)
+
+        md_content = md_path.read_text(encoding="utf-8")
+        assert "**配置版本**: v2" in md_content
+
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        for row in rows:
+            assert row["config_version"] == "v2"
+
+    def test_version_survives_restart_in_both_exports(self):
+        mgr = ConfigManager(self.tmp)
+        mgr.load()
+        config = mgr.set_duplicate_strategy(DuplicateStrategy.SKIP)
+        self.store.update_config_version(self.batch, config.version)
+
+        mgr2 = ConfigManager(self.tmp)
+        config2 = mgr2.load()
+        assert config2.version == 2
+
+        config2 = mgr2.set_duplicate_strategy(DuplicateStrategy.BLOCK)
+        reloaded = self.store.load_batch(self.batch.id)
+        self.store.update_config_version(reloaded, config2.version)
+
+        md_path = self.tmp / "report.md"
+        csv_path = self.tmp / "report.csv"
+        exporter2 = ReportExporter(self.tmp)
+        exporter2.export_markdown(reloaded, md_path)
+        exporter2.export_csv(reloaded, csv_path)
+
+        md_content = md_path.read_text(encoding="utf-8")
+        assert "**配置版本**: v3" in md_content
+
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        for row in rows:
+            assert row["config_version"] == "v3"
+
+    def test_csv_all_rows_have_same_version(self):
+        csv_path = self.tmp / "report.csv"
+        self.exporter.export_csv(self.batch, csv_path)
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        versions = {row["config_version"] for row in rows}
+        assert len(versions) == 1
+        assert "v1" in versions

@@ -167,6 +167,7 @@ class ReportExporter:
             custom_field_keys.update(point.custom_fields.keys())
 
         fieldnames = [
+            "config_version",
             "point_id",
             "point_name",
             "category",
@@ -201,6 +202,7 @@ class ReportExporter:
                 )
 
                 row = {
+                    "config_version": f"v{batch.config_version}",
                     "point_id": point.id,
                     "point_name": point.name,
                     "category": point.category,
