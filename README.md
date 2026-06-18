@@ -215,7 +215,7 @@ patrol snapshot show
 # 先按需要调整规则
 patrol rules set-duplicate rename
 patrol rules add-ext .heic
-patrol rules set-template "{point.category}/{point.id}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"
+patrol rules set-template "{point.category}/{point.id}_{photo.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"
 
 # 导出快照
 patrol snapshot export -o ./snapshots/prod_rules.json \
@@ -229,11 +229,13 @@ patrol snapshot export -o ./snapshots/prod_rules.json \
 ✓ 规则快照已导出
   快照ID: snapshot_20260619_xxxxxx_xxxxxxxx
   快照名称: 生产环境规则
-  配置版本: v3
+  配置版本: v4
   导出人: 张三
   导出时间: 2026-06-19 xx:xx:xx
   文件路径: ./snapshots/prod_rules.json
 ```
+
+> 注：初始配置版本为 v1，每次修改规则递增 1，三次修改后为 v4（v1→v2→v3→v4）。
 
 ### 2. 查看快照文件内容
 ```bash
@@ -270,9 +272,11 @@ patrol snapshot import -f ./snapshots/prod_rules.json
 ```
 ✓ 快照导入成功
   新配置版本: v2
-  已同步批次: 3 个
+  已同步批次: 2 个
   操作已记录到日志
 ```
+
+> 注：新配置版本 = 原版本 + 1（导入算一次变更），已同步批次数等于当前工作区中已有的批次数量。
 
 ### 5. 取消导入
 输入 `n` 或 `no` 取消：
