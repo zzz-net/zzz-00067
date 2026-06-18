@@ -34,9 +34,12 @@ class ReportExporter:
         output_path: Path,
         include_notes: bool = True,
         include_conflicts: bool = True,
+        config_version: Optional[int] = None,
     ) -> Path:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        display_version = config_version if config_version is not None else batch.config_version
 
         lines = []
         lines.append(f"# 巡检照片归档报告")
@@ -45,7 +48,7 @@ class ReportExporter:
         lines.append(f"**批次 ID**: {batch.id}")
         lines.append(f"**创建时间**: {batch.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"**更新时间**: {batch.updated_at.strftime('%Y-%m-%d %H:%M:%S')}")
-        lines.append(f"**配置版本**: v{batch.config_version}")
+        lines.append(f"**配置版本**: v{display_version}")
         lines.append("")
 
         summary = self._get_summary(batch)
@@ -158,9 +161,12 @@ class ReportExporter:
         batch: Batch,
         output_path: Path,
         include_notes: bool = True,
+        config_version: Optional[int] = None,
     ) -> Path:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        display_version = config_version if config_version is not None else batch.config_version
 
         custom_field_keys = set()
         for point in batch.points.values():
@@ -202,7 +208,7 @@ class ReportExporter:
                 )
 
                 row = {
-                    "config_version": f"v{batch.config_version}",
+                    "config_version": f"v{display_version}",
                     "point_id": point.id,
                     "point_name": point.name,
                     "category": point.category,

@@ -250,6 +250,29 @@ class BatchStore:
         batch.config_version = config_version
         self._save_batch(batch)
 
+    def update_all_batches_config_version(self, config_version: int) -> int:
+        updated_count = 0
+        if not self.batches_dir.exists():
+            return updated_count
+
+        for batch_file in self.batches_dir.glob("batch_*.json"):
+            try:
+                with open(batch_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if data.get("config_version") != config_version:
+                    data["config_version"] = config_version
+                    data["updated_at"] = datetime.now().isoformat()
+                    with open(batch_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2, ensure_ascii=False)
+                    updated_count += 1
+            except Exception:
+                continue
+
+        if self._current_batch:
+            self._current_batch.config_version = config_version
+
+        return updated_count
+
     def set_file_paths(
         self,
         batch: Batch,

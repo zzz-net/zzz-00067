@@ -396,3 +396,179 @@ class TestSnapshotExportImport:
 
         assert len(result.conflicts) == 0
         assert "无冲突" in result.message
+
+    def test_import_updates_all_batch_versions_immediately(self):
+        mgr_a = ConfigManager(self.workspace_a)
+        mgr_a.load()
+        mgr_a.set_duplicate_strategy(DuplicateStrategy.RENAME)
+        mgr_a.export_snapshot(self.snapshot_file, name="全量更新测试")
+
+        mgr_b = ConfigManager(self.workspace_b)
+        store_b = BatchStore(self.workspace_b)
+        batch1 = store_b.create_batch(name="batch_old_1", config_version=1)
+        batch2 = store_b.create_batch(name="batch_old_2", config_version=1)
+        batch3 = store_b.create_batch(name="batch_old_3", config_version=1)
+        store_b.set_current_batch(batch3.id)
+
+        assert batch1.config_version == 1
+        assert batch2.config_version == 1
+        assert batch3.config_version == 1
+
+        snapshot = mgr_b.load_snapshot(self.snapshot_file)
+        applied = mgr_b.apply_snapshot(snapshot, source_path=self.snapshot_file, author="tester")
+
+        updated_count = store_b.update_all_batches_config_version(applied.version)
+        assert updated_count == 3
+
+        reloaded1 = store_b.load_batch(batch1.id)
+        reloaded2 = store_b.load_batch(batch2.id)
+        reloaded3 = store_b.load_batch(batch3.id)
+        assert reloaded1.config_version == applied.version
+        assert reloaded2.config_version == applied.version
+        assert reloaded3.config_version == applied.version
+
+    def test_import_then_export_without_preview(self):
+        mgr_a = ConfigManager(self.workspace_a)
+        mgr_a.load()
+        mgr_a.set_duplicate_strategy(DuplicateStrategy.RENAME)
+        mgr_a.export_snapshot(self.snapshot_file, name="导出测试")
+
+        mgr_b = ConfigManager(self.workspace_b)
+        store_b = BatchStore(self.workspace_b)
+        batch = store_b.create_batch(name="export_test", config_version=1)
+        store_b.add_points(batch, [
+            Point(id="P001", name="点位1", category="A"),
+            Point(id="P002", name="点位2", category="B"),
+        ])
+
+        snapshot = mgr_b.load_snapshot(self.snapshot_file)
+        applied = mgr_b.apply_snapshot(snapshot, source_path=self.snapshot_file, author="tester")
+        store_b.update_all_batches_config_version(applied.version)
+
+        exporter = ReportExporter(self.workspace_b)
+        md_path = self.workspace_b / "test_export.md"
+        exporter.export_markdown(batch, md_path, config_version=applied.version)
+
+        content = md_path.read_text(encoding="utf-8")
+        assert f"**配置版本**: v{applied.version}" in content
+        assert "v1" not in content.split("**配置版本**:")[1].split("\n")[0]
+
+        csv_path = self.workspace_b / "test_export.csv"
+        exporter.export_csv(batch, csv_path, config_version=applied.version)
+        csv_content = csv_path.read_text(encoding="utf-8-sig")
+        assert f"v{applied.version}" in csv_content
+
+    def test_switch_old_batch_then_export(self):
+        mgr_a = ConfigManager(self.workspace_a)
+        mgr_a.load()
+        mgr_a.set_duplicate_strategy(DuplicateStrategy.OVERWRITE)
+        mgr_a.export_snapshot(self.snapshot_file, name="切换批次测试")
+
+        mgr_b = ConfigManager(self.workspace_b)
+        store_b = BatchStore(self.workspace_b)
+        batch_old = store_b.create_batch(name="old_batch", config_version=1)
+        store_b.add_points(batch_old, [Point(id="P001", name="旧点位", category="A")])
+        batch_new = store_b.create_batch(name="new_batch", config_version=1)
+        store_b.set_current_batch(batch_new.id)
+
+        snapshot = mgr_b.load_snapshot(self.snapshot_file)
+        applied = mgr_b.apply_snapshot(snapshot, source_path=self.snapshot_file, author="tester")
+        store_b.update_all_batches_config_version(applied.version)
+
+        store_b.set_current_batch(batch_old.id)
+        reloaded_old = store_b.load_batch(batch_old.id)
+        assert reloaded_old.config_version == applied.version
+
+        exporter = ReportExporter(self.workspace_b)
+        md_path = self.workspace_b / "old_batch_export.md"
+        exporter.export_markdown(reloaded_old, md_path, config_version=applied.version)
+
+        content = md_path.read_text(encoding="utf-8")
+        assert f"**配置版本**: v{applied.version}" in content
+        assert "P001" in content
+
+    def test_import_cancel_does_not_affect_config(self):
+        mgr_a = ConfigManager(self.workspace_a)
+        mgr_a.load()
+        mgr_a.set_duplicate_strategy(DuplicateStrategy.RENAME)
+        mgr_a.export_snapshot(self.snapshot_file, name="取消测试")
+
+        mgr_b = ConfigManager(self.workspace_b)
+        store_b = BatchStore(self.workspace_b)
+        batch = store_b.create_batch(name="test_batch", config_version=1)
+
+        config_before = mgr_b.load()
+        assert config_before.version == 1
+        assert config_before.duplicate_strategy == DuplicateStrategy.BLOCK
+        assert batch.config_version == 1
+
+        snapshot = mgr_b.load_snapshot(self.snapshot_file)
+        result = mgr_b.check_import_conflicts(snapshot)
+        assert len(result.conflicts) > 0
+
+        config_after_cancel = mgr_b.load()
+        assert config_after_cancel.version == 1
+        assert config_after_cancel.duplicate_strategy == DuplicateStrategy.BLOCK
+
+        reloaded_batch = store_b.load_batch(batch.id)
+        assert reloaded_batch.config_version == 1
+
+    def test_exporter_uses_provided_config_version(self):
+        mgr = ConfigManager(self.workspace_a)
+        mgr.load()
+        store = BatchStore(self.workspace_a)
+        batch = store.create_batch(name="test_batch", config_version=1)
+        store.add_points(batch, [Point(id="P001", name="测试", category="A")])
+
+        exporter = ReportExporter(self.workspace_a)
+
+        md_path_1 = self.workspace_a / "export_v1.md"
+        exporter.export_markdown(batch, md_path_1, config_version=1)
+        assert "**配置版本**: v1" in md_path_1.read_text(encoding="utf-8")
+
+        md_path_99 = self.workspace_a / "export_v99.md"
+        exporter.export_markdown(batch, md_path_99, config_version=99)
+        assert "**配置版本**: v99" in md_path_99.read_text(encoding="utf-8")
+
+        csv_path_5 = self.workspace_a / "export_v5.csv"
+        exporter.export_csv(batch, csv_path_5, config_version=5)
+        assert "v5" in csv_path_5.read_text(encoding="utf-8-sig")
+
+    def test_import_updates_batch_show_version(self):
+        mgr_a = ConfigManager(self.workspace_a)
+        mgr_a.load()
+        mgr_a.set_duplicate_strategy(DuplicateStrategy.SKIP)
+        mgr_a.export_snapshot(self.snapshot_file, name="batch show 测试")
+
+        mgr_b = ConfigManager(self.workspace_b)
+        store_b = BatchStore(self.workspace_b)
+        batch1 = store_b.create_batch(name="b1", config_version=1)
+        batch2 = store_b.create_batch(name="b2", config_version=1)
+        batch3 = store_b.create_batch(name="b3", config_version=1)
+
+        snapshot = mgr_b.load_snapshot(self.snapshot_file)
+        applied = mgr_b.apply_snapshot(snapshot, source_path=self.snapshot_file)
+        updated = store_b.update_all_batches_config_version(applied.version)
+        assert updated == 3
+
+        for batch_id in [batch1.id, batch2.id, batch3.id]:
+            b = store_b.load_batch(batch_id)
+            assert b.config_version == applied.version
+
+    def test_no_batches_still_works(self):
+        mgr_a = ConfigManager(self.workspace_a)
+        mgr_a.load()
+        mgr_a.set_duplicate_strategy(DuplicateStrategy.RENAME)
+        mgr_a.export_snapshot(self.snapshot_file)
+
+        mgr_b = ConfigManager(self.workspace_b)
+        store_b = BatchStore(self.workspace_b)
+
+        snapshot = mgr_b.load_snapshot(self.snapshot_file)
+        applied = mgr_b.apply_snapshot(snapshot, source_path=self.snapshot_file)
+
+        updated = store_b.update_all_batches_config_version(applied.version)
+        assert updated == 0
+
+        new_batch = store_b.create_batch(name="first_batch", config_version=applied.version)
+        assert new_batch.config_version == applied.version

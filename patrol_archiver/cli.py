@@ -41,11 +41,16 @@ def get_workspace(ctx) -> Path:
     return Path(ctx.obj["workspace"]).resolve()
 
 
-def sync_batch_config_version(workspace: Path, config_version: int) -> None:
+def sync_batch_config_version(workspace: Path, config_version: int, all_batches: bool = False) -> int:
     store = BatchStore(workspace)
-    batch = store.get_current_batch()
-    if batch:
-        store.update_config_version(batch, config_version)
+    if all_batches:
+        return store.update_all_batches_config_version(config_version)
+    else:
+        batch = store.get_current_batch()
+        if batch:
+            store.update_config_version(batch, config_version)
+            return 1
+        return 0
 
 
 def get_or_create_batch(ctx, require_existing: bool = False):
@@ -513,7 +518,7 @@ def snapshot_import(ctx, snapshot_file: Path, author: Optional[str], force: bool
         author=author,
     )
 
-    sync_batch_config_version(workspace, applied_config.version)
+    updated_count = sync_batch_config_version(workspace, applied_config.version, all_batches=True)
 
     import_log = SnapshotImportLog(
         id=f"log_{snapshot.snapshot_id}",
@@ -533,6 +538,7 @@ def snapshot_import(ctx, snapshot_file: Path, author: Optional[str], force: bool
 
     console.print(f"\n[green]✓ 快照导入成功[/green]")
     console.print(f"  新配置版本: v{applied_config.version}")
+    console.print(f"  已同步批次: {updated_count} 个")
     console.print(f"  操作已记录到日志")
 
 
@@ -1121,6 +1127,8 @@ def export_markdown(ctx, output: Path, no_notes: bool, no_conflicts: bool):
     """导出 Markdown 报告"""
     batch = get_or_create_batch(ctx, require_existing=True)
     workspace = get_workspace(ctx)
+    config_mgr = ConfigManager(workspace)
+    config = config_mgr.load()
 
     exporter = ReportExporter(workspace)
     output_path = exporter.export_markdown(
@@ -1128,6 +1136,7 @@ def export_markdown(ctx, output: Path, no_notes: bool, no_conflicts: bool):
         output,
         include_notes=not no_notes,
         include_conflicts=not no_conflicts,
+        config_version=config.version,
     )
 
     console.print(f"[green]✓ Markdown 报告已导出到: {output_path}[/green]")
@@ -1141,12 +1150,15 @@ def export_csv(ctx, output: Path, no_notes: bool):
     """导出 CSV 报告"""
     batch = get_or_create_batch(ctx, require_existing=True)
     workspace = get_workspace(ctx)
+    config_mgr = ConfigManager(workspace)
+    config = config_mgr.load()
 
     exporter = ReportExporter(workspace)
     output_path = exporter.export_csv(
         batch,
         output,
         include_notes=not no_notes,
+        config_version=config.version,
     )
 
     console.print(f"[green]✓ CSV 报告已导出到: {output_path}[/green]")
