@@ -497,8 +497,119 @@ class TestSnapshotCliEndToEnd:
             ["rules", "set-template", "{photo.nonexist}_{point.id}"],
             self.workspace_a,
         )
-        assert result.exit_code == 0
+        assert result.exit_code != 0
+        assert "命名模板更新失败" in result.output
         assert "未知模板变量" in result.output
+
+    def test_illegal_template_not_persisted_cli(self):
+        """非法模板必须在持久化前拒绝，配置版本保持不变。"""
+        r1 = self._run(["rules", "show"], self.workspace_a)
+        assert r1.exit_code == 0
+        version_before = self._read_config_version(self.workspace_a)
+
+        r2 = self._run(
+            ["rules", "set-template", "{point.id}_{photo.bad_attr}_{photo.another_bad}"],
+            self.workspace_a,
+        )
+        assert r2.exit_code != 0
+        assert "photo.bad_attr" in r2.output and "photo.another_bad" in r2.output
+
+        version_after = self._read_config_version(self.workspace_a)
+        assert version_after == version_before
+
+    def test_snapshot_import_illegal_template_rejected_cli(self):
+        """含非法变量的快照导入必须在落库前被拒绝，配置保持不变。"""
+        self._run(["rules", "set-duplicate", "rename"], self.workspace_a)
+        tpl_before_a = self._read_naming_template(self.workspace_a)
+        snap_content_illegal = {
+            "snapshot_id": "snap_illegal",
+            "name": "非法模板快照",
+            "description": "",
+            "config_version": 1,
+            "created_by": "tester",
+            "created_at": "2026-06-19T00:00:00",
+            "naming_template": "{point.id}_{photo.nonexist_attr}_{photo.source_path.suffix}",
+            "allowed_extensions": [".jpg"],
+            "duplicate_strategy": "skip",
+            "archive_action": "copy",
+            "archive_dir": "archive",
+            "photo_dir": "photos",
+            "notes_json": "notes.json",
+            "points_csv": "points.csv",
+            "default_author": "tester",
+        }
+        with open(self.snapshot_file, "w", encoding="utf-8") as f:
+            json.dump(snap_content_illegal, f, ensure_ascii=False)
+
+        self._run(["rules", "show"], self.workspace_b)
+        cfg_before = self._read_config_version(self.workspace_b)
+        tpl_before_b = self._read_naming_template(self.workspace_b)
+
+        result = self._run(
+            ["snapshot", "import", "-f", str(self.snapshot_file), "--force"],
+            self.workspace_b,
+        )
+        assert result.exit_code != 0
+        assert "快照导入失败" in result.output
+        assert "命名模板不合法" in result.output
+        assert "photo.nonexist_attr" in result.output
+
+        cfg_after = self._read_config_version(self.workspace_b)
+        tpl_after_b = self._read_naming_template(self.workspace_b)
+        assert cfg_after == cfg_before, (
+            f"拒绝导入后配置版本不应该递增: {cfg_before} -> {cfg_after}"
+        )
+        assert tpl_after_b == tpl_before_b, (
+            f"拒绝导入后命名模板不应该被替换"
+        )
+        assert self._read_naming_template(self.workspace_a) == tpl_before_a
+
+    def test_legal_template_with_alias_still_accepted_cli(self):
+        """含别名 {photo.name} 的模板合法（只是警告），不被拒绝。"""
+        result = self._run(
+            ["rules", "set-template", "{point.id}_{photo.name}_{photo.source_path.suffix}"],
+            self.workspace_a,
+        )
+        assert result.exit_code == 0
+        assert "命名模板已更新" in result.output
+        assert "别名" in result.output
+
+    def test_legal_snapshot_import_with_alias_still_works_cli(self):
+        """含别名 {photo.name} 的快照导入正常成功（只是警告），preview 可用。"""
+        alias_tpl = "{point.id}_{photo.name}_{photo.source_path.suffix}"
+        self._run(["rules", "set-template", alias_tpl], self.workspace_a)
+        self._run(
+            ["snapshot", "export", "-o", str(self.snapshot_file), "--name", "别名快照"],
+            self.workspace_a,
+        )
+
+        result = self._run(
+            ["snapshot", "import", "-f", str(self.snapshot_file), "--force"],
+            self.workspace_b,
+        )
+        assert result.exit_code == 0
+        assert "快照导入成功" in result.output
+        assert "别名" in result.output
+
+        self._setup_sample_data(self.workspace_b)
+        preview = self._run(["preview"], self.workspace_b)
+        assert preview.exit_code == 0
+        previews, _ = self._batch_metrics(self.workspace_b)
+        assert previews >= 9
+
+    def _read_config_version(self, workspace: Path) -> int:
+        cf = workspace / ".patrol-archiver" / "config.json"
+        if not cf.exists():
+            return 0
+        with open(cf, "r", encoding="utf-8") as f:
+            return json.load(f).get("version", 0)
+
+    def _read_naming_template(self, workspace: Path) -> str:
+        cf = workspace / ".patrol-archiver" / "config.json"
+        if not cf.exists():
+            return ""
+        with open(cf, "r", encoding="utf-8") as f:
+            return json.load(f).get("naming_template", "")
 
     def test_readme_snapshot_example_template_preview_ok_cli(self):
         readme_tpl = "{point.category}/{point.id}_{point.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"

@@ -23,6 +23,7 @@ from .models import (
     ArchiveAction,
     ConflictType,
     DuplicateStrategy,
+    InvalidNamingTemplateError,
     SnapshotImportLog,
 )
 from .preview import PreviewGenerator
@@ -310,13 +311,20 @@ def rules_set_template(ctx, template: str):
     """
     workspace = get_workspace(ctx)
     config_mgr = ConfigManager(workspace)
-    is_valid, warnings = config_mgr.validate_naming_template(template)
-    config = config_mgr.update_naming_template(template)
+    _, warnings = config_mgr.validate_naming_template(template)
+    alias_warnings = [w for w in warnings if not w.startswith("未知")]
+    try:
+        config = config_mgr.update_naming_template(template)
+    except InvalidNamingTemplateError as e:
+        console.print(f"[red]✗ 命名模板更新失败[/red]")
+        for err in e.errors:
+            console.print(f"  • {err}")
+        sys.exit(1)
     sync_batch_config_version(workspace, config.version)
     console.print(f"[green]✓ 命名模板已更新[/green]")
     console.print(f"  新版本: v{config.version}")
     console.print(f"  模板: {config.naming_template}")
-    for w in warnings:
+    for w in alias_warnings:
         console.print(f"  [yellow]⚠ {w}[/yellow]")
 
 
@@ -515,11 +523,18 @@ def snapshot_import(ctx, snapshot_file: Path, author: Optional[str], force: bool
     if author is None:
         author = config.default_author
 
-    applied_config = config_mgr.apply_snapshot(
-        snapshot=snapshot,
-        source_path=snapshot_file.resolve(),
-        author=author,
-    )
+    try:
+        applied_config = config_mgr.apply_snapshot(
+            snapshot=snapshot,
+            source_path=snapshot_file.resolve(),
+            author=author,
+        )
+    except InvalidNamingTemplateError as e:
+        console.print(f"\n[red]✗ 快照导入失败: 命名模板不合法[/red]")
+        for err in e.errors:
+            console.print(f"  • {err}")
+        console.print("  请修正快照中的命名模板后再导入。")
+        sys.exit(1)
 
     updated_count = sync_batch_config_version(workspace, applied_config.version, all_batches=True)
 

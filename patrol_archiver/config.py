@@ -13,6 +13,7 @@ from .models import (
     ConflictType,
     DuplicateStrategy,
     ImportResult,
+    InvalidNamingTemplateError,
     LastSnapshotInfo,
     RuleSnapshot,
     SnapshotConflict,
@@ -68,6 +69,10 @@ class ConfigManager:
             json.dump(self._config.model_dump(mode="json"), f, indent=2, ensure_ascii=False)
 
     def update_naming_template(self, template: str) -> ArchiverConfig:
+        _, warnings = self.validate_naming_template(template)
+        errors = [w for w in warnings if w.startswith("未知")]
+        if errors:
+            raise InvalidNamingTemplateError(template, errors)
         config = self.load()
         config.naming_template = template
         self.save(config)
@@ -299,6 +304,11 @@ class ConfigManager:
         source_path: Optional[Path] = None,
         author: str = "user",
     ) -> ArchiverConfig:
+        _, warnings = self.validate_naming_template(snapshot.naming_template)
+        errors = [w for w in warnings if w.startswith("未知")]
+        if errors:
+            raise InvalidNamingTemplateError(snapshot.naming_template, errors)
+
         config = self.load()
 
         config.naming_template = snapshot.naming_template

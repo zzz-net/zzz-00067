@@ -269,3 +269,13 @@ class SnapshotImportLog(OperationLogEntry):
     @classmethod
     def _convert_log_source_path(cls, v):
         return Path(v) if v else v
+
+
+class InvalidNamingTemplateError(ValueError):
+    """命名模板含未知变量或不合法，在持久化/导入前抛出。"""
+
+    def __init__(self, template: str, errors: List[str]):
+        self.template = template
+        self.errors = list(errors)
+        msg_lines = ["命名模板不合法："] + [f"  • {e}" for e in self.errors]
+        super().__init__("\n".join(msg_lines))

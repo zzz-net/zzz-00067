@@ -468,6 +468,7 @@ patrol archive --confirm
 | `{photo.taken_at:%Y%m%d_%H%M%S}` | 拍摄时间（可自定义格式） |
 | `{photo.source_path.suffix}` | 源文件扩展名 |
 | `{photo.file_name}` | 源文件名 |
+| `{photo.name}` | 源文件名（别名，等价于 `{photo.file_name}`，仅用于兼容误用，推荐使用 `{photo.file_name}`） |
 
 示例：
 - `"{point.category}/{point.id}_{point.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"`
