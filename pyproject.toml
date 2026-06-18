@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "patrol-archiver"
+version = "1.0.0"
+description = "本地巡检照片归档 CLI 工具 - 多文件、多命令的专业归档管理工具"
+requires-python = ">=3.9"
+dependencies = [
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+    "python-dateutil>=2.8.0",
+]
+
+[project.scripts]
+patrol = "patrol_archiver.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["patrol_archiver*"]

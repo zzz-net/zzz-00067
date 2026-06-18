@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+import hashlib
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field, field_validator
+
+
+class AnnotationStatus(str, Enum):
+    PENDING = "pending"
+    TO_REPHOTO = "to_rephoto"
+    CONFIRMED = "confirmed"
+    IGNORED = "ignored"
+    ARCHIVED = "archived"
+
+
+class DuplicateStrategy(str, Enum):
+    SKIP = "skip"
+    RENAME = "rename"
+    OVERWRITE = "overwrite"
+    BLOCK = "block"
+
+
+class ArchiveAction(str, Enum):
+    MOVE = "move"
+    COPY = "copy"
+
+
+class NoteEntry(BaseModel):
+    timestamp: datetime
+    author: str = "system"
+    content: str
+
+
+class Point(BaseModel):
+    id: str
+    name: str
+    category: str = ""
+    location: str = ""
+    description: str = ""
+    custom_fields: Dict[str, Any] = Field(default_factory=dict)
+
+
+class Photo(BaseModel):
+    source_path: Path
+    file_name: str
+    file_size: int
+    file_hash: str
+    taken_at: Optional[datetime] = None
+    point_id: Optional[str] = None
+    camera: str = ""
+
+    @field_validator("source_path", mode="before")
+    @classmethod
+    def _convert_path(cls, v):
+        return Path(v) if v else v
+
+    @classmethod
+    def from_path(cls, path: Path) -> "Photo":
+        stat = path.stat()
+        file_hash = cls._compute_hash(path)
+        return cls(
+            source_path=path,
+            file_name=path.name,
+            file_size=stat.st_size,
+            file_hash=file_hash,
+        )
+
+    @staticmethod
+    def _compute_hash(path: Path, chunk_size: int = 8192) -> str:
+        sha256 = hashlib.sha256()
+        with open(path, "rb") as f:
+            while chunk := f.read(chunk_size):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+
+class Annotation(BaseModel):
+    id: str
+    point_id: str
+    photo_id: Optional[str] = None
+    status: AnnotationStatus = AnnotationStatus.PENDING
+    notes: List[NoteEntry] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+    def add_note(self, content: str, author: str = "user") -> None:
+        self.notes.append(NoteEntry(
+            timestamp=datetime.now(),
+            author=author,
+            content=content,
+        ))
+        self.updated_at = datetime.now()
+
+
+class PreviewItem(BaseModel):
+    photo: Photo
+    point: Optional[Point] = None
+    target_path: Path
+    will_conflict: bool = False
+    duplicate_strategy: DuplicateStrategy = DuplicateStrategy.BLOCK
+    annotation: Optional[Annotation] = None
+
+    @field_validator("target_path", mode="before")
+    @classmethod
+    def _convert_target_path(cls, v):
+        return Path(v) if v else v
+
+
+class Conflict(BaseModel):
+    id: str
+    target_path: Path
+    existing_source: Optional[Path] = None
+    new_source: Path
+    reason: str
+    resolved: bool = False
+    resolution: str = ""
+
+    @field_validator("target_path", "existing_source", "new_source", mode="before")
+    @classmethod
+    def _convert_paths(cls, v):
+        return Path(v) if v else v
+
+
+class UndoRecord(BaseModel):
+    id: str
+    timestamp: datetime = Field(default_factory=datetime.now)
+    action_type: str
+    description: str
+    previous_state: Dict[str, Any]
+
+
+class Batch(BaseModel):
+    id: str
+    name: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    config_version: int = 1
+    points: Dict[str, Point] = Field(default_factory=dict)
+    photos: Dict[str, Photo] = Field(default_factory=dict)
+    annotations: Dict[str, Annotation] = Field(default_factory=dict)
+    previews: List[PreviewItem] = Field(default_factory=list)
+    conflicts: List[Conflict] = Field(default_factory=list)
+    undo_stack: List[UndoRecord] = Field(default_factory=list)
+    notes_json_path: Optional[Path] = None
+    photo_dir: Optional[Path] = None
+    csv_path: Optional[Path] = None
+
+    @field_validator("notes_json_path", "photo_dir", "csv_path", mode="before")
+    @classmethod
+    def _convert_opt_paths(cls, v):
+        return Path(v) if v else v
+
+
+class ArchiverConfig(BaseModel):
+    version: int = 1
+    naming_template: str = "{point.category}/{point.id}_{point.name}_{photo.taken_at:%Y%m%d_%H%M%S}{photo.source_path.suffix}"
+    allowed_extensions: List[str] = Field(default_factory=lambda: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp"])
+    duplicate_strategy: DuplicateStrategy = DuplicateStrategy.BLOCK
+    archive_action: ArchiveAction = ArchiveAction.COPY
+    archive_dir: Path = Path("./archive")
+    photo_dir: Path = Path("./photos")
+    notes_json: Path = Path("./notes.json")
+    points_csv: Path = Path("./points.csv")
+    default_author: str = "user"
+
+    @field_validator("archive_dir", "photo_dir", "notes_json", "points_csv", mode="before")
+    @classmethod
+    def _convert_paths(cls, v):
+        return Path(v) if v else v
+
+    @field_validator("allowed_extensions")
+    @classmethod
+    def _normalize_extensions(cls, v):
+        return [ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in v]
