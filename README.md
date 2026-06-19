@@ -401,6 +401,15 @@ patrol draft save "6月巡检-审批版" -d "rename策略+copy动作，已通过
 patrol draft list
 ```
 
+**提示**：当没有草稿时，`draft list` 会输出「暂无草稿」而不是空表格，便于脚本和 CI 判断。
+
+**预期输出有草稿时**：显示草稿列表表格，包含 ID、名称、创建时间、来源批次、规则版本、预览项、冲突(未解决)。
+
+**预期输出无草稿时**：
+```
+暂无草稿
+```
+
 #### 4. 查看草稿详情（draft show）
 ```bash
 patrol draft show "6月巡检-审批版"
@@ -747,6 +756,7 @@ Commands:
     remove-ext  移除允许的扩展名
     set-duplicate  设置重复策略
     set-action  设置归档方式
+    set-archive-dir  设置归档输出目录
 
   scan       扫描照片目录
   preview    生成归档预览
