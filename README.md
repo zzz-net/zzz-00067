@@ -742,56 +742,59 @@ patrol archive --confirm
 patrol [OPTIONS] COMMAND [ARGS]...
 
 Commands:
-  batch      批次管理
-    new      创建新批次
-    list     列出所有批次
-    switch   切换到指定批次
-    show     显示当前批次信息
-
-  import     导入点位清单
-  rules      规则管理
-    show     显示当前规则配置
-    set-template  设置命名模板
-    add-ext  添加允许的扩展名
-    remove-ext  移除允许的扩展名
-    set-duplicate  设置重复策略
-    set-action  设置归档方式
-    set-archive-dir  设置归档输出目录
-
-  scan       扫描照片目录
-  preview    生成归档预览
-
-  annotate   点位标注
+  annotate  点位标注
+    history  查看点位备注历史
     mark     标注点位状态
     note     为点位添加备注
     status   查看点位标注状态
-    history  查看点位备注历史
 
-  undo       撤销上一条标注操作
+  archive  执行归档（确认前不移动或复制源照片）
 
-  archive    执行归档
-  conflict   冲突处理
+  batch  批次管理
+    list    列出所有批次
+    new     创建新批次
+    show    显示当前批次信息
+    switch  切换到指定批次
+
+  conflict  冲突处理
     list     列出冲突
     resolve  标记冲突为已解决
 
-  export     导出报告
-    markdown 导出 Markdown 报告
-    csv      导出 CSV 报告
-
-  snapshot   规则快照管理
-    export   导出当前规则为快照文件
-    import   导入规则快照（冲突时需确认）
-    log      查看快照导入操作日志
-    show     查看当前快照信息或指定快照内容
-
-  draft      归档方案草稿管理（保存、查看、恢复预览方案）
-    save     将当前批次的预览结果保存为草稿
-    list     列出所有草稿
-    show     查看草稿详情
-    restore  恢复草稿到当前批次
+  draft  归档方案草稿管理（保存、查看、恢复预览方案）
     delete   删除指定草稿
+    list     列出所有草稿
+    restore  恢复草稿到当前批次
+    save     将当前批次的预览结果保存为草稿
+    show     查看草稿详情
 
-  info       显示系统信息
+  export  导出报告
+    csv       导出 CSV 报告
+    markdown  导出 Markdown 报告
+
+  import  导入点位清单
+
+  info  显示系统信息
+
+  preview  生成归档预览（确认前不移动或复制源照片）
+
+  rules  规则管理（命名模板、扩展名、重复策略等）
+    add-ext          添加允许的文件扩展名
+    remove-ext       移除允许的文件扩展名
+    set-action       设置归档操作方式
+    set-archive-dir  设置归档输出目录
+    set-duplicate    设置重复照片策略
+    set-template     设置命名模板
+    show             显示当前规则配置
+
+  scan  扫描照片目录
+
+  snapshot  规则快照管理（导出、导入、查看日志）
+    export  导出当前规则为快照文件
+    import  导入规则快照（存在冲突时需确认）
+    log     查看快照导入操作日志
+    show    查看当前快照信息或指定快照文件内容
+
+  undo  撤销上一条标注操作
 ```
 
 ## 开发说明

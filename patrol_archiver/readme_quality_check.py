@@ -523,7 +523,166 @@ def check_readme_command_reference(
 
 
 # ---------------------------------------------------------------------------
-# 6. CLI 入口（可选，便于直接运行）
+# 6. README 命令参考同步 / 重建工具
+# ---------------------------------------------------------------------------
+
+
+def _group_commands_by_parent(
+    commands: List[HelpCommandInfo],
+) -> Dict[Optional[str], List[HelpCommandInfo]]:
+    """按父命令分组，便于生成层次化输出。"""
+    groups: Dict[Optional[str], List[HelpCommandInfo]] = {}
+    for cmd in commands:
+        parent = " ".join(cmd.path[:-1]) if len(cmd.path) > 1 else None
+        groups.setdefault(parent, []).append(cmd)
+    for key in groups:
+        groups[key].sort(key=lambda c: c.name)
+    return groups
+
+
+def _calc_column_width(entries: List[HelpCommandInfo]) -> int:
+    """计算命令名列的对齐宽度（最长命令名 + 2 空格）。"""
+    if not entries:
+        return 20
+    max_len = max(len(e.name) for e in entries)
+    return max_len + 2
+
+
+def generate_command_reference_block(
+    cli_commands: Optional[List[HelpCommandInfo]] = None,
+) -> str:
+    """
+    根据真实 CLI 帮助输出生成 README 命令参考代码块内容。
+
+    格式与 `python -m patrol_archiver.cli --help` 输出保持一致：
+    - 顶层命令：2 空格缩进，命令名 + 对齐的帮助文本
+    - 子命令：4 空格缩进，按父命令分组排列
+    - 组之间空一行
+
+    Args:
+        cli_commands: 可选，传入预收集的命令列表以避免重复 subprocess 调用
+
+    Returns:
+        代码块内容（不含 ``` 围栏）
+    """
+    if cli_commands is None:
+        cli_commands = collect_real_help_commands()
+
+    grouped = _group_commands_by_parent(cli_commands)
+    top_level = grouped.get(None, [])
+
+    lines: List[str] = []
+    lines.append("patrol [OPTIONS] COMMAND [ARGS]...")
+    lines.append("")
+    lines.append("Commands:")
+
+    for i, group_cmd in enumerate(top_level):
+        col_width = _calc_column_width([group_cmd])
+        indent = "  "
+        cmd_name = group_cmd.name.ljust(col_width)
+        lines.append(f"{indent}{cmd_name}{group_cmd.help_short}")
+
+        if group_cmd.is_group:
+            sub_cmds = grouped.get(group_cmd.full_name, [])
+            if sub_cmds:
+                sub_col_width = _calc_column_width(sub_cmds)
+                sub_indent = "    "
+                for sub in sub_cmds:
+                    sub_name = sub.name.ljust(sub_col_width)
+                    lines.append(f"{sub_indent}{sub_name}{sub.help_short}")
+
+        # 组之间空一行（除了最后一个）
+        if i < len(top_level) - 1:
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def sync_readme_command_reference(
+    readme_path: Optional[Path] = None,
+    cli_commands: Optional[List[HelpCommandInfo]] = None,
+) -> Tuple[bool, int, int, QualityCheckReport]:
+    """
+    同步 README 命令参考章节：用真实 CLI 帮助输出重写代码块。
+
+    流程：
+    1. 收集真实 CLI 命令结构
+    2. 生成格式正确的命令参考代码块
+    3. 定位 README 中 `## 命令参考` 章节的代码块
+    4. 替换旧代码块为新生成的内容
+    5. 写入文件并返回新报告
+
+    Args:
+        readme_path: README 文件路径，默认项目根目录 README.md
+        cli_commands: 可选，预收集的 CLI 命令列表
+
+    Returns:
+        (changed, old_issue_count, new_issue_count, new_report)
+        - changed: 是否实际修改了文件
+        - old_issue_count: 同步前的问题数
+        - new_issue_count: 同步后的问题数（应为 0）
+        - new_report: 同步后的质量检查报告
+    """
+    if readme_path is None:
+        readme_path = Path(__file__).resolve().parent.parent / "README.md"
+
+    old_report = check_readme_command_reference(
+        readme_path=readme_path, help_strict=True
+    )
+    old_issue_count = old_report.issue_count
+
+    readme_text = readme_path.read_text(encoding="utf-8")
+    lines = readme_text.splitlines(keepends=True)
+
+    header_idx: Optional[int] = None
+    for i, line in enumerate(lines):
+        if line.strip() == README_COMMAND_REF_HEADER:
+            header_idx = i
+            break
+    if header_idx is None:
+        raise ValueError(f"README 中未找到章节: {README_COMMAND_REF_HEADER}")
+
+    code_start: Optional[int] = None
+    code_end: Optional[int] = None
+    for j in range(header_idx + 1, len(lines)):
+        stripped = lines[j].strip()
+        if stripped.startswith("```") and code_start is None:
+            code_start = j
+            continue
+        if code_start is not None and stripped == "```" and j > code_start:
+            code_end = j
+            break
+
+    if code_start is None or code_end is None:
+        raise ValueError("README 命令参考章节中未找到代码块围栏 ```")
+
+    new_block_content = generate_command_reference_block(cli_commands=cli_commands)
+
+    fence_line = lines[code_start]
+    # 保留原围栏行的 ``` 和语言标记（如果有）
+    new_lines = (
+        lines[: code_start + 1]
+        + [new_block_content + "\n" if not new_block_content.endswith("\n") else new_block_content]
+        + [lines[code_end]]
+        + lines[code_end + 1 :]
+    )
+
+    new_readme_text = "".join(new_lines)
+    changed = new_readme_text != readme_text
+
+    if changed:
+        readme_path.write_text(new_readme_text, encoding="utf-8")
+
+    new_report = check_readme_command_reference(
+        readme_path=readme_path, help_strict=True
+    )
+    new_issue_count = new_report.issue_count
+
+    return changed, old_issue_count, new_issue_count, new_report
+
+
+# ---------------------------------------------------------------------------
+# 7. CLI 入口（可选，便于直接运行）
 # ---------------------------------------------------------------------------
 
 
@@ -547,7 +706,7 @@ def main():
     _setup_output_encoding()
 
     parser = argparse.ArgumentParser(
-        description="检查 README 命令参考与 CLI 帮助输出的一致性"
+        description="检查 / 同步 README 命令参考与 CLI 帮助输出的一致性"
     )
     parser.add_argument(
         "--readme",
@@ -560,7 +719,53 @@ def main():
         action="store_true",
         help="不严格比对帮助文案（只检查命令存在性）",
     )
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="同步模式：用真实 CLI 帮助输出重写 README 命令参考章节",
+    )
+    parser.add_argument(
+        "--generate",
+        action="store_true",
+        help="生成模式：只打印新的命令参考代码块，不修改文件",
+    )
     args = parser.parse_args()
+
+    if args.generate:
+        block = generate_command_reference_block()
+        print("```")
+        print(block)
+        print("```")
+        sys.exit(0)
+
+    if args.sync:
+        try:
+            changed, old_count, new_count, new_report = sync_readme_command_reference(
+                readme_path=args.readme,
+            )
+        except ValueError as e:
+            print(f"同步失败: {e}")
+            sys.exit(2)
+
+        if changed:
+            print(f"已同步 README 命令参考章节")
+            print(f"  同步前问题数: {old_count}")
+            print(f"  同步后问题数: {new_count}")
+            if new_count > 0:
+                print()
+                print(new_report.format_report())
+                sys.exit(1)
+            else:
+                print("  同步后严格校验通过 ✓")
+                sys.exit(0)
+        else:
+            print("README 命令参考已是最新，无需修改")
+            if new_count > 0:
+                print(new_report.format_report())
+                sys.exit(1)
+            else:
+                print("严格校验通过 ✓")
+                sys.exit(0)
 
     report = check_readme_command_reference(
         readme_path=args.readme,

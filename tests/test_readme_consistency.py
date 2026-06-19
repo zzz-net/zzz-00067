@@ -1081,12 +1081,12 @@ class TestRealHelpVsReadmeStrict:
         self.readme_path = self.project_root / "README.md"
         self.readme_text = self.readme_path.read_text(encoding="utf-8")
 
-    def test_strict_comparison_detects_help_mismatches(self):
+    def test_strict_comparison_passes_after_sync(self):
         """
-        严格模式下应检测到帮助文案不一致。
+        严格模式下严格校验应通过。
 
-        注意：此测试验证的是"严格比对功能正常工作"。
-        如果未来 README 和 CLI 完全对齐，此测试需要更新预期。
+        场景一：当前仓库默认跑严格校验就能通过。
+        这是用户要求的基本能力：README 命令参考必须与真实 CLI 完全一致。
         """
         from patrol_archiver.readme_quality_check import check_readme_command_reference
 
@@ -1095,14 +1095,20 @@ class TestRealHelpVsReadmeStrict:
             help_strict=True,
         )
 
-        assert report.has_issues, (
-            "严格模式下应该能检测到一些帮助文案差异，"
-            "如果 README 已完全对齐，请更新此测试的预期。"
+        assert not report.has_issues, (
+            "严格校验未通过（README 与 CLI 帮助存在差异）：\n"
+            + report.format_report()
         )
-        assert len(report.help_mismatch) > 0, "应检测到帮助文案不一致"
-
-        mismatch_names = {d.full_name for d in report.help_mismatch}
-        assert "rules" in mismatch_names, "应检测到 rules 组的帮助文案差异"
+        assert len(report.missing_in_readme) == 0, (
+            f"README 缺少命令: {[d.full_name for d in report.missing_in_readme]}"
+        )
+        assert len(report.extra_in_readme) == 0, (
+            f"README 多出命令: {[d.full_name for d in report.extra_in_readme]}"
+        )
+        assert len(report.help_mismatch) == 0, (
+            f"帮助文案不一致的命令: {[(d.full_name, d.cli_help, d.readme_help) for d in report.help_mismatch]}"
+        )
+        assert report.issue_count == 0, f"问题总数应为 0，实际为 {report.issue_count}"
 
     def test_non_strict_comparison_passes_command_existence(self):
         """非严格模式下，命令存在性校验应通过。"""
@@ -1120,15 +1126,28 @@ class TestRealHelpVsReadmeStrict:
             f"README 多出命令: {[d.full_name for d in report.extra_in_readme]}"
         )
 
-    def test_mismatches_have_precise_line_numbers(self):
-        """帮助文案不一致的差异必须带有精确的 README 行号。"""
-        from patrol_archiver.readme_quality_check import check_readme_command_reference
+    def test_mismatches_have_precise_line_numbers_when_bad_readme(self):
+        """
+        故意制造帮助文案不一致时，差异必须带有精确的 README 行号。
 
-        report = check_readme_command_reference(
-            readme_path=self.readme_path,
-            help_strict=True,
+        场景二：CLI 帮助或 README 被临时改动后，检查要明确定位到具体命令或段落。
+        """
+        from patrol_archiver.readme_quality_check import (
+            parse_readme_command_reference,
+            collect_real_help_commands,
+            compare_cli_and_readme,
         )
 
+        bad_readme = self._modify_command_help(
+            "batch show",
+            "显示当前批次信息",
+            "完全不同的描述文案"
+        )
+        bad_entries, _, _ = parse_readme_command_reference(bad_readme)
+        cli_commands = collect_real_help_commands()
+        report = compare_cli_and_readme(cli_commands, bad_entries, help_strict=True)
+
+        assert len(report.help_mismatch) > 0, "应检测到帮助文案不一致"
         for diff in report.help_mismatch:
             assert diff.readme_line is not None, (
                 f"命令 {diff.full_name} 的差异没有行号"
@@ -1139,38 +1158,392 @@ class TestRealHelpVsReadmeStrict:
             assert diff.cli_help, f"命令 {diff.full_name} 缺少 CLI 帮助文本"
             assert diff.readme_help, f"命令 {diff.full_name} 缺少 README 帮助文本"
 
-    def test_mismatches_show_both_sides(self):
-        """差异报告必须同时显示 CLI 和 README 两侧的文案。"""
-        from patrol_archiver.readme_quality_check import check_readme_command_reference
-
-        report = check_readme_command_reference(
-            readme_path=self.readme_path,
-            help_strict=True,
+        mismatch_names = {d.full_name for d in report.help_mismatch}
+        assert "batch show" in mismatch_names, "应检测到 batch show 文案不一致"
+        batch_show_diff = next(d for d in report.help_mismatch if d.full_name == "batch show")
+        assert "完全不同的描述文案" in batch_show_diff.readme_help, (
+            "差异应包含被修改的 README 侧文案"
         )
+        assert "显示当前批次信息" in batch_show_diff.cli_help, (
+            "差异应包含原始的 CLI 侧文案"
+        )
+
+    def test_mismatches_show_both_sides_when_bad_readme(self):
+        """
+        故意制造失配时，差异报告必须同时显示 CLI 和 README 两侧的文案。
+
+        场景二延伸：报告输出要让用户一眼看到两侧差异。
+        """
+        from patrol_archiver.readme_quality_check import (
+            parse_readme_command_reference,
+            collect_real_help_commands,
+            compare_cli_and_readme,
+        )
+
+        bad_readme = self._remove_command_from_readme("draft delete")
+        bad_readme = self._add_fake_command("fake_cmd", "假命令描述", readme_text=bad_readme)
+        bad_readme = self._modify_command_help(
+            "archive",
+            "执行归档（确认前不移动或复制源照片）",
+            "被篡改的归档命令描述",
+            readme_text=bad_readme,
+        )
+
+        bad_entries, _, _ = parse_readme_command_reference(bad_readme)
+        cli_commands = collect_real_help_commands()
+        report = compare_cli_and_readme(cli_commands, bad_entries, help_strict=True)
 
         formatted = report.format_report()
-        assert "CLI:" in formatted, "报告应显示 CLI 侧的文案"
-        assert "README:" in formatted, "报告应显示 README 侧的文案"
-        assert "帮助文案不一致" in formatted, "报告应标注文案不一致"
+
+        assert "README 缺失的命令" in formatted, "报告应有缺失命令章节"
+        for d in report.missing_in_readme:
+            assert d.full_name in formatted, f"报告应包含缺失的命令名: {d.full_name}"
+            assert d.cli_help in formatted, f"报告应包含缺失命令的 CLI 帮助: {d.cli_help}"
+
+        assert "README 多出的命令" in formatted, "报告应有多余命令章节"
+        for d in report.extra_in_readme:
+            assert d.full_name in formatted, f"报告应包含多余的命令名: {d.full_name}"
+            line_str = f"L{d.readme_line}"
+            assert line_str in formatted or str(d.readme_line) in formatted, (
+                f"报告应包含多余命令的行号: L{d.readme_line}"
+            )
+
+        if report.help_mismatch:
+            assert "帮助文案不一致" in formatted, "报告应有帮助文案不一致章节"
+            assert "CLI:" in formatted, "报告应显示 CLI 侧的文案"
+            assert "README:" in formatted, "报告应显示 README 侧的文案"
+            for d in report.help_mismatch:
+                assert d.full_name in formatted, f"报告应包含不一致的命令名: {d.full_name}"
 
     def test_quality_check_report_has_issue_count(self):
-        """QualityCheckReport 应能统计问题总数。"""
-        from patrol_archiver.readme_quality_check import check_readme_command_reference
+        """QualityCheckReport 应能正确统计问题总数。"""
+        from patrol_archiver.readme_quality_check import QualityCheckReport, CommandDiff
 
-        report = check_readme_command_reference(
-            readme_path=self.readme_path,
-            help_strict=True,
+        report = QualityCheckReport()
+        assert report.issue_count == 0
+        assert not report.has_issues
+
+        report.missing_in_readme.append(CommandDiff(
+            kind="missing_in_readme",
+            full_name="test1",
+            message="test",
+        ))
+        report.extra_in_readme.append(CommandDiff(
+            kind="extra_in_readme",
+            full_name="test2",
+            message="test",
+        ))
+        report.help_mismatch.append(CommandDiff(
+            kind="help_mismatch",
+            full_name="test3",
+            message="test",
+        ))
+        report.section_missing.append("test section")
+        assert report.issue_count == 4
+        assert report.has_issues
+
+    # -- 辅助方法 --------------------------------------------------------
+
+    def _remove_command_from_readme(self, command_full_name: str, readme_text: Optional[str] = None) -> str:
+        """从 README 命令参考中删除指定命令，返回修改后的文本。"""
+        if readme_text is None:
+            readme_text = self.readme_text
+        lines = readme_text.splitlines()
+        parts = command_full_name.split()
+        if len(parts) == 1:
+            pattern = re.compile(r"^\s{2}" + re.escape(parts[0]) + r"\s+")
+        else:
+            parent, child = parts
+            pattern = re.compile(r"^\s{4}" + re.escape(child) + r"\s+")
+
+        new_lines = []
+        for i, line in enumerate(lines):
+            if pattern.match(line):
+                if len(parts) == 1 or (len(parts) == 2 and self._line_belongs_to_parent(lines, i, parent)):
+                    continue
+            new_lines.append(line)
+
+        return "\n".join(new_lines)
+
+    def _add_fake_command(
+        self,
+        cmd_name: str,
+        help_text: str = "假命令",
+        readme_text: Optional[str] = None,
+    ) -> str:
+        """在 README 命令参考中添加一条假的顶层命令。"""
+        if readme_text is None:
+            readme_text = self.readme_text
+
+        lines = readme_text.splitlines()
+        new_lines = []
+        in_code_block = False
+        added = False
+        for line in lines:
+            new_lines.append(line)
+            if not added and line.strip().startswith("```"):
+                if not in_code_block:
+                    in_code_block = True
+                else:
+                    in_code_block = False
+            if in_code_block and not added and line.strip().startswith("import"):
+                new_lines.append(f"  {cmd_name}  {help_text}")
+                added = True
+
+        return "\n".join(new_lines)
+
+    def _modify_command_help(
+        self,
+        command_full_name: str,
+        old_help: str,
+        new_help: str,
+        readme_text: Optional[str] = None,
+    ) -> str:
+        """修改 README 中某条命令的帮助文案。"""
+        if readme_text is None:
+            readme_text = self.readme_text
+        lines = readme_text.splitlines()
+        new_lines = []
+        parts = command_full_name.split()
+
+        if len(parts) == 1:
+            cmd = parts[0]
+            pattern = re.compile(r"^(\s{2}" + re.escape(cmd) + r"\s+)" + re.escape(old_help) + r"$")
+        else:
+            _, child = parts
+            pattern = re.compile(r"^(\s{4}" + re.escape(child) + r"\s+)" + re.escape(old_help) + r"$")
+
+        for line in lines:
+            m = pattern.match(line)
+            if m:
+                new_lines.append(m.group(1) + new_help)
+            else:
+                new_lines.append(line)
+
+        return "\n".join(new_lines)
+
+    def _line_belongs_to_parent(self, lines, line_idx: int, parent: str) -> bool:
+        """判断某行子命令是否属于指定的父命令组。"""
+        for i in range(line_idx - 1, -1, -1):
+            stripped = lines[i].strip()
+            if not stripped:
+                continue
+            if stripped.startswith(parent + " "):
+                return True
+            if stripped.startswith("  ") and not stripped.startswith("    "):
+                return False
+        return False
+
+
+class TestReadmeSyncTool:
+    """
+    README 命令参考同步/重建工具的回归测试。
+
+    覆盖：
+    - 生成工具输出包含所有命令且格式正确
+    - 生成工具结果稳定（重启一致性）
+    - 同步工具幂等（多次同步不重复修改）
+    - 同步工具能修复故意制造的失配
+    - 同步前后报告差异数下降到 0
+    """
+
+    def setup_method(self):
+        self.project_root = Path(__file__).resolve().parent.parent
+        self.readme_path = self.project_root / "README.md"
+        self.readme_text = self.readme_path.read_text(encoding="utf-8")
+
+    def teardown_method(self):
+        # 恢复原始 README（如果被测试修改）
+        current = self.readme_path.read_text(encoding="utf-8")
+        if current != self.readme_text:
+            self.readme_path.write_text(self.readme_text, encoding="utf-8")
+
+    def test_generate_command_reference_block_complete(self):
+        """生成的命令参考块必须包含所有 CLI 命令。"""
+        from patrol_archiver.readme_quality_check import (
+            generate_command_reference_block,
+            collect_real_help_commands,
         )
 
-        expected_count = (
-            len(report.missing_in_readme)
-            + len(report.extra_in_readme)
-            + len(report.help_mismatch)
-            + len(report.section_missing)
+        cli_commands = collect_real_help_commands()
+        block = generate_command_reference_block(cli_commands=cli_commands)
+
+        assert "patrol [OPTIONS] COMMAND [ARGS]..." in block, "块头应包含用法说明"
+        assert "Commands:" in block, "块应包含 Commands: 标题"
+
+        for cmd in cli_commands:
+            assert cmd.name in block, f"生成的块应包含命令名: {cmd.full_name}"
+            if cmd.help_short:
+                assert cmd.help_short in block, (
+                    f"生成的块应包含帮助文案: {cmd.full_name} → {cmd.help_short}"
+                )
+
+    def test_generate_command_reference_block_deterministic(self):
+        """
+        两次生成的结果逐字节一致。
+
+        场景：同一工作区重启后重复执行，生成结果要稳定。
+        """
+        from patrol_archiver.readme_quality_check import generate_command_reference_block
+
+        first = generate_command_reference_block()
+        second = generate_command_reference_block()
+
+        assert first == second, (
+            "两次生成的命令参考块不一致（生成结果不稳定）。\n"
+            f"第一次:\n{first}\n\n第二次:\n{second}"
         )
-        assert report.issue_count == expected_count, (
-            f"问题计数不一致: {report.issue_count} != {expected_count}"
+
+    def test_generate_block_is_parseable(self):
+        """生成的块必须能被 README 解析器正确解析出所有命令。"""
+        from patrol_archiver.readme_quality_check import (
+            generate_command_reference_block,
+            collect_real_help_commands,
+            parse_readme_command_reference,
         )
+
+        cli_commands = collect_real_help_commands()
+        block = generate_command_reference_block(cli_commands=cli_commands)
+
+        fake_readme = f"## 命令参考\n\n```\n{block}\n```\n"
+        entries, _, _ = parse_readme_command_reference(fake_readme)
+
+        cli_paths = {" ".join(c.path) for c in cli_commands}
+        readme_paths = {" ".join(e.path) for e in entries}
+
+        missing_in_generated = cli_paths - readme_paths
+        assert not missing_in_generated, (
+            f"生成的块缺少命令: {missing_in_generated}"
+        )
+        extra_in_generated = readme_paths - cli_paths
+        assert not extra_in_generated, (
+            f"生成的块包含多余命令: {extra_in_generated}"
+        )
+
+    def test_sync_tool_is_idempotent(self):
+        """
+        同步工具幂等：连续同步两次，第二次不修改文件。
+
+        场景：同一工作区重启后重复执行同步，结果稳定。
+        """
+        from patrol_archiver.readme_quality_check import sync_readme_command_reference
+
+        # 备份原始内容
+        backup = self.readme_path.read_text(encoding="utf-8")
+        try:
+            changed1, old1, new1, report1 = sync_readme_command_reference(
+                readme_path=self.readme_path,
+            )
+            after_first = self.readme_path.read_text(encoding="utf-8")
+
+            changed2, old2, new2, report2 = sync_readme_command_reference(
+                readme_path=self.readme_path,
+            )
+            after_second = self.readme_path.read_text(encoding="utf-8")
+
+            # 第二次不应修改文件
+            assert changed2 is False, (
+                "第二次同步不应再修改文件（幂等性失败）"
+            )
+            assert after_first == after_second, (
+                "两次同步后的文件内容应完全相同"
+            )
+            assert new2 == 0, f"第二次同步后问题数应为 0，实际 {new2}"
+            assert report2.issue_count == 0, "第二次同步后报告应为 0 问题"
+        finally:
+            self.readme_path.write_text(backup, encoding="utf-8")
+
+    def test_sync_tool_fixes_introduced_mismatches(self):
+        """
+        同步工具能修复故意制造的失配：删除命令、添加假命令、篡改帮助文案。
+
+        场景：README 被临时改动后，运行 --sync 可以一键收敛所有差异。
+        """
+        from patrol_archiver.readme_quality_check import (
+            check_readme_command_reference,
+            sync_readme_command_reference,
+        )
+
+        # 1. 备份原始 README
+        backup = self.readme_path.read_text(encoding="utf-8")
+        try:
+            # 2. 故意制造三类失配（使用增强版辅助方法，支持 readme_text 链）
+            helper = TestRealHelpVsReadmeStrict()
+            helper.setup_method()
+            bad_readme = helper._remove_command_from_readme("draft save")
+            bad_readme = helper._add_fake_command(
+                "nonexistent_cmd", "这个命令根本不存在", readme_text=bad_readme
+            )
+            bad_readme = helper._modify_command_help(
+                "rules show",
+                "显示当前规则配置",
+                "完全不同的规则描述",
+                readme_text=bad_readme,
+            )
+            self.readme_path.write_text(bad_readme, encoding="utf-8")
+
+            # 3. 确认失配被检测到
+            pre_report = check_readme_command_reference(
+                readme_path=self.readme_path, help_strict=True
+            )
+            assert pre_report.has_issues, "故意制造的失配应被检测到"
+            assert len(pre_report.missing_in_readme) >= 1, "应检测到缺失命令"
+            assert len(pre_report.extra_in_readme) >= 1, "应检测到多余命令"
+            assert len(pre_report.help_mismatch) >= 1, "应检测到文案不一致"
+
+            # 4. 运行同步
+            changed, old_count, new_count, post_report = sync_readme_command_reference(
+                readme_path=self.readme_path,
+            )
+
+            # 5. 验证修复结果
+            assert changed is True, "同步应修改了文件（修复了失配）"
+            assert old_count >= 3, f"同步前至少有 3 个问题，实际 {old_count}"
+            assert new_count == 0, f"同步后问题数应为 0，实际 {new_count}"
+            assert post_report.issue_count == 0, "同步后报告应为 0 问题"
+            assert not post_report.has_issues, "同步后严格校验应通过"
+
+            # 6. 验证具体失配被修复
+            assert len(post_report.missing_in_readme) == 0, "缺失命令应被补回"
+            assert len(post_report.extra_in_readme) == 0, "多余命令应被移除"
+            assert len(post_report.help_mismatch) == 0, "文案不一致应被对齐"
+
+            # 7. 再次同步验证幂等
+            changed2, _, new_count2, report2 = sync_readme_command_reference(
+                readme_path=self.readme_path,
+            )
+            assert changed2 is False, "修复后再次同步不应修改文件"
+            assert new_count2 == 0, "修复后再次同步问题数应为 0"
+        finally:
+            self.readme_path.write_text(backup, encoding="utf-8")
+
+    def test_sync_result_deterministic_across_restart(self):
+        """
+        连续两次完整的"制造失配 → 同步"流程，最终文件内容完全一致。
+
+        场景：同一工作区重启后重复执行同步流程，结果稳定。
+        """
+        from patrol_archiver.readme_quality_check import sync_readme_command_reference
+
+        backup = self.readme_path.read_text(encoding="utf-8")
+        try:
+            def run_sync_cycle() -> str:
+                helper = TestRealHelpVsReadmeStrict()
+                helper.setup_method()
+                bad = helper._remove_command_from_readme("snapshot log")
+                bad = helper._add_fake_command("bogus", "假命令", readme_text=bad)
+                self.readme_path.write_text(bad, encoding="utf-8")
+                sync_readme_command_reference(readme_path=self.readme_path)
+                return self.readme_path.read_text(encoding="utf-8")
+
+            result1 = run_sync_cycle()
+            result2 = run_sync_cycle()
+
+            assert result1 == result2, (
+                "两次同步循环后的最终结果不一致（重启稳定性失败）"
+            )
+        finally:
+            self.readme_path.write_text(backup, encoding="utf-8")
 
 
 class TestRealHelpDeterminism:
